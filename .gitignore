@@ -1,0 +1,13 @@
+# Ignorar credenciais e arquivos locais
+credentials.json
+venv/
+__pycache__/
+*.pyc
+.env
+.vscode/
+.idea/
+.DS_Store
+*.egg-info/
+dist/
+build/
+.streamlit/secrets.toml
