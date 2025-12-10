@@ -5,6 +5,5 @@ google-auth-httplib2==0.2.0
 pandas==2.1.3
 python-dateutil==2.8.2
 streamlit-option-menu==0.3.6
-streamlit-sortables==0.0.4
 Pillow==10.1.0
 plotly==5.17.0
