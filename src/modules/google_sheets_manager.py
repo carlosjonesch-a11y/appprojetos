@@ -64,9 +64,33 @@ class GoogleSheetsManager:
                     
                     if "private_key" in creds_dict and "client_email" in creds_dict:
                         pk = creds_dict["private_key"]
-                        # Transform to bytes if needed
-                        if isinstance(pk, str):
-                            pk_bytes = pk.encode("utf-8")
+                        # Normalize string: ensure windows newlines and \n escaped sequences are proper
+                        if isinstance(pk, (bytes, bytearray)):
+                            try:
+                                pk_str = pk.decode("utf-8")
+                            except Exception:
+                                pk_str = str(pk)
+                        else:
+                            pk_str = str(pk)
+
+                        # Normalize escapes and line endings
+                        pk_str = pk_str.replace('\\r\\n', '\n')
+                        pk_str = pk_str.replace('\\n', '\n')
+                        pk_str = pk_str.replace('\r\n', '\n')
+                        pk_str = pk_str.replace('\r', '\n')
+                        # Trim spaces on each line
+                        pk_lines = [line.strip() for line in pk_str.splitlines() if line.strip()]
+                        # Reconstruct sanitized pk string
+                        pk_sanitized = '\n'.join(pk_lines)
+                        # Ensure header/footer are correct
+                        if not pk_sanitized.startswith('-----BEGIN '):
+                            # Try to detect header
+                            pos = pk_sanitized.find('-----BEGIN')
+                            if pos != -1:
+                                pk_sanitized = pk_sanitized[pos:]
+                        
+                        # Convert to bytes for parsing
+                        pk_bytes = pk_sanitized.encode('utf-8')
                         else:
                             pk_bytes = pk
                         # Debug: confirmar tipo
