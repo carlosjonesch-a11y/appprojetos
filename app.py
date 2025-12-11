@@ -347,6 +347,12 @@ if not st.session_state.google_sheets_manager:
     with st.expander("🕵️ Debug de Credenciais (Clique aqui se não conecta)"):
         st.write("### Diagnóstico de Secrets")
         
+        # Versões das bibliotecas
+        import pyasn1
+        import rsa
+        st.write(f"**Versão pyasn1:** `{pyasn1.__version__}` (Esperado: 0.5.1)")
+        st.write(f"**Versão rsa:** `{rsa.__version__}`")
+        
         # Verifica GOOGLE_CREDENTIALS
         if "GOOGLE_CREDENTIALS" in st.secrets:
             st.success("✅ Chave 'GOOGLE_CREDENTIALS' encontrada em st.secrets")
