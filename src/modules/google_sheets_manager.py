@@ -39,34 +39,61 @@ class GoogleSheetsManager:
             if isinstance(credentials_json, dict):
                 # Se for um dicionário (vindo de Streamlit secrets)
                 creds_dict = dict(credentials_json)
-                
-                # Tenta o método padrão primeiro, mas com tratamento especial para a chave
+
+                # We will use the file-based approach as primary for dict-like credentials
+                # to avoid pyasn1/RA issues on Streamlit Cloud. This also normalizes the key.
                 try:
-                    if "private_key" in creds_dict:
-                        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-                    
-                    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-                except Exception as e_std:
-                    # Se falhar, tenta construção manual do Signer (Bypass para erro do pyasn1)
-                    print(f"DEBUG: Falha no método padrão: {e_std}. Tentando fallback por arquivo...")
-                    # Try file fallback first: write temp JSON and use from_service_account_file
+                    # Normalize and sanitize private_key to safe PEM format
+                    if 'private_key' in creds_dict:
+                        pk_val = creds_dict['private_key']
+                        if isinstance(pk_val, (bytes, bytearray)):
+                            pk_str = pk_val.decode('utf-8')
+                        else:
+                            pk_str = str(pk_val)
+                        # Convert literal '\\n' sequences and windows CRLFs
+                        pk_str = pk_str.replace('\\r\\n', '\n').replace('\\r', '\n')
+                        pk_str = pk_str.replace('\\n', '\n')
+                        # strip spaces from lines and ensure begin/end lines exist
+                        lines = [l.strip() for l in pk_str.splitlines() if l.strip()]
+                        if lines and not lines[0].startswith('-----BEGIN'):
+                            # attempt to find the header
+                            joined = '\n'.join(lines)
+                            pos = joined.find('-----BEGIN')
+                            if pos != -1:
+                                joined = joined[pos:]
+                            pk_str = joined
+                        else:
+                            pk_str = '\n'.join(lines)
+                        creds_dict['private_key'] = pk_str
+
+                    # Write creds to a temp file and use from_service_account_file — this avoids
+                    # the pyasn1 string vs file issues of google-auth in some linux/Python builds.
+                    import tempfile, os
+                    tmpfile = None
                     try:
-                        import tempfile, os
                         tmpf = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8')
-                        json.dump(creds_dict, tmpf)
+                        json.dump(creds_dict, tmpf, ensure_ascii=False)
                         tmpf.flush()
                         tmpf.close()
-                        print(f"DEBUG: Escritor temporario criado em (early fallback): {tmpf.name}")
-                        creds = Credentials.from_service_account_file(tmpf.name, scopes=scopes)
-                        os.unlink(tmpf.name)
-                        self.gc = gspread.authorize(creds)
-                        self.connected = True
-                        print("DEBUG: Fallback por arquivo (early) funcionou")
-                        return
-                    except Exception as e_file_early:
-                        print('DEBUG: Early file fallback falhou:', e_file_early)
-                        # Continue to manual signer fallback
-                    print(f"DEBUG: Tentando método manual após fallback por arquivo falhado: {e_std}...")
+                        tmpfile = tmpf.name
+                        # Masked log: show beginning and length only
+                        masked = str(creds_dict.get('private_key', '')[:25]) + '...'
+                        print(f"DEBUG: Temp credentials written to: {tmpfile} (private_key start: {masked} len={len(creds_dict.get('private_key',''))})")
+                        creds = Credentials.from_service_account_file(tmpfile, scopes=scopes)
+                        # Remove temp file right after parse
+                        try:
+                            os.unlink(tmpfile)
+                        except Exception:
+                            pass
+                    finally:
+                        # If tmpfile still exists remove it
+                        try:
+                            if tmpfile and os.path.exists(tmpfile):
+                                os.unlink(tmpfile)
+                        except Exception:
+                            pass
+
+                    self.gc = gspread.authorize(creds)
                     
                     from google.auth import crypt
                     from google.oauth2 import service_account
