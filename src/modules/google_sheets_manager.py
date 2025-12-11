@@ -91,7 +91,29 @@ class GoogleSheetsManager:
                                 print("DEBUG: SignerWrapper criado com sucesso usando cryptography")
                             except Exception as exc_crypt:
                                 print("DEBUG: Fallback cryptography parsing falhou:", exc_crypt)
-                                raise
+                                # Ultimo recurso: escrever em arquivo temporario e usar from_service_account_file
+                                try:
+                                    import tempfile
+                                    import os
+                                    tmp = None
+                                    creds_copy = dict(creds_dict)
+                                    # Ensure private key is string with proper newlines
+                                    if isinstance(creds_copy.get('private_key'), (bytes, bytearray)):
+                                        creds_copy['private_key'] = creds_copy['private_key'].decode('utf-8')
+                                    tmpf = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json')
+                                    json.dump(creds_copy, tmpf)
+                                    tmpf.flush()
+                                    tmpf.close()
+                                    print(f"DEBUG: Escritor temporario criado em: {tmpf.name}")
+                                    creds = Credentials.from_service_account_file(tmpf.name, scopes=scopes)
+                                    os.unlink(tmpf.name)
+                                    self.gc = gspread.authorize(creds)
+                                    # Se chegou aqui, retornamos
+                                    self.connected = True
+                                    return
+                                except Exception as exc_file:
+                                    print('DEBUG: Fallback de arquivo falhou:', exc_file)
+                                    raise
                         creds = service_account.Credentials(
                             signer,
                             service_account_email=creds_dict["client_email"],
