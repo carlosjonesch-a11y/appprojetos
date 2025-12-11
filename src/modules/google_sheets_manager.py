@@ -10,6 +10,8 @@ from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 # ID da planilha Google Sheets
 SPREADSHEET_ID = "1cyZg-dt1BR4K7pTKvx5o8rWKP7_uNHrDQDdlYedTQI0"
 
+import traceback
+
 class GoogleSheetsManager:
     """Gerenciador de integração com Google Sheets"""
     
@@ -21,19 +23,29 @@ class GoogleSheetsManager:
             credentials_json: Caminho do arquivo de credenciais JSON ou dict com as credenciais
         """
         self.last_error = None
+        self.error_traceback = None
         try:
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
                 "https://www.googleapis.com/auth/drive"
             ]
 
+            # Converte para dict se for um objeto parecido com dict (como AttrDict do Streamlit)
+            if hasattr(credentials_json, "to_dict"):
+                credentials_json = credentials_json.to_dict()
+            elif hasattr(credentials_json, "keys") and not isinstance(credentials_json, dict):
+                credentials_json = dict(credentials_json)
+
             if isinstance(credentials_json, dict):
                 # Se for um dicionário (vindo de Streamlit secrets)
-                # Corrige formatação da chave privada se necessário
-                if "private_key" in credentials_json:
-                    credentials_json["private_key"] = credentials_json["private_key"].replace("\\n", "\n")
+                # Cria uma cópia para não modificar o original
+                creds_dict = dict(credentials_json)
                 
-                creds = Credentials.from_service_account_info(credentials_json, scopes=scopes)
+                # Corrige formatação da chave privada se necessário
+                if "private_key" in creds_dict:
+                    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+                
+                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
                 self.gc = gspread.authorize(creds)
                 
             elif isinstance(credentials_json, str):
@@ -61,6 +73,9 @@ class GoogleSheetsManager:
             self.connected = True
         except Exception as e:
             self.last_error = str(e)
+            self.error_traceback = traceback.format_exc()
+            print(f"DEBUG: Erro no GoogleSheetsManager: {e}")
+            print(self.error_traceback)
             st.error(f"Erro ao conectar ao Google Sheets: {e}")
             self.connected = False
     

@@ -402,6 +402,9 @@ if not st.session_state.google_sheets_manager:
                      tmp_manager = GoogleSheetsManager(tmp_creds)
                      if not tmp_manager.connected:
                          st.error(f"❌ Erro retornado pelo Google Sheets: {tmp_manager.last_error}")
+                         if tmp_manager.error_traceback:
+                             st.code(tmp_manager.error_traceback, language="python")
+                         
                          if "404" in str(tmp_manager.last_error):
                              st.warning("💡 Dica: Erro 404 geralmente significa que a planilha não existe ou não foi compartilhada com o email da conta de serviço.")
                              st.info(f"Email da conta de serviço: {tmp_creds.get('client_email', 'Não encontrado')}")
