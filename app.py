@@ -38,31 +38,54 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Inicialização de estado
-if "projetos" not in st.session_state:
-    st.session_state.projetos = []
-
-if "demandas" not in st.session_state:
-    st.session_state.demandas = []
-
-if "etapas" not in st.session_state:
-    st.session_state.etapas = []
-
+# Inicialização do Google Sheets Manager PRIMEIRO
 if "google_sheets_manager" not in st.session_state:
     try:
         # Primeiro tenta usar Streamlit secrets (Streamlit Cloud)
         if "GOOGLE_CREDENTIALS" in st.secrets:
             credentials = dict(st.secrets["GOOGLE_CREDENTIALS"])
             st.session_state.google_sheets_manager = GoogleSheetsManager(credentials)
+            st.info("✅ Conectado via Streamlit Secrets")
         # Se não houver secrets, tenta arquivo local (desenvolvimento)
         elif os.path.exists("credentials.json"):
             st.session_state.google_sheets_manager = GoogleSheetsManager("credentials.json")
+            st.info("✅ Conectado via credentials.json local")
         else:
             st.session_state.google_sheets_manager = None
             st.warning("⚠️ Credenciais não encontradas. Configure as secrets no Streamlit Cloud.")
     except Exception as e:
         st.session_state.google_sheets_manager = None
-        st.warning(f"⚠️ Erro ao conectar Google Sheets: {str(e)[:100]}")
+        st.error(f"⚠️ Erro ao conectar Google Sheets: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+
+# Inicialização de estado - carrega do Google Sheets se disponível
+if "projetos" not in st.session_state:
+    if st.session_state.google_sheets_manager:
+        try:
+            st.session_state.projetos = st.session_state.google_sheets_manager.load_projetos()
+        except:
+            st.session_state.projetos = []
+    else:
+        st.session_state.projetos = []
+
+if "demandas" not in st.session_state:
+    if st.session_state.google_sheets_manager:
+        try:
+            st.session_state.demandas = st.session_state.google_sheets_manager.load_demandas()
+        except:
+            st.session_state.demandas = []
+    else:
+        st.session_state.demandas = []
+
+if "etapas" not in st.session_state:
+    if st.session_state.google_sheets_manager:
+        try:
+            st.session_state.etapas = st.session_state.google_sheets_manager.load_etapas()
+        except:
+            st.session_state.etapas = []
+    else:
+        st.session_state.etapas = []
 
 if "modo_edicao" not in st.session_state:
     st.session_state.modo_edicao = False
@@ -72,18 +95,6 @@ if "demanda_em_edicao" not in st.session_state:
 
 if "projeto_em_edicao" not in st.session_state:
     st.session_state.projeto_em_edicao = None
-
-# Carregar dados automaticamente na primeira execução
-if "dados_carregados" not in st.session_state:
-    st.session_state.dados_carregados = False
-    if st.session_state.google_sheets_manager:
-        try:
-            st.session_state.projetos = st.session_state.google_sheets_manager.load_projetos()
-            st.session_state.demandas = st.session_state.google_sheets_manager.load_demandas()
-            st.session_state.etapas = st.session_state.google_sheets_manager.load_etapas()
-            st.session_state.dados_carregados = True
-        except Exception as e:
-            st.warning(f"⚠️ Erro ao carregar dados: {str(e)[:100]}")
 
 # ============= FUNÇÕES AUXILIARES =============
 
@@ -276,6 +287,15 @@ tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "📋 Kanban", "✏️ Geren
 # ============= TAB 1: DASHBOARD =============
 with tab1:
     st.header("Dashboard Principal")
+    
+    # Debug: Mostrar contagem de dados
+    col_debug1, col_debug2, col_debug3 = st.columns(3)
+    with col_debug1:
+        st.metric("Projetos", len(st.session_state.projetos))
+    with col_debug2:
+        st.metric("Etapas", len(st.session_state.etapas))
+    with col_debug3:
+        st.metric("Demandas", len(st.session_state.demandas))
     
     if st.session_state.demandas or st.session_state.projetos:
         # Seção de métricas
