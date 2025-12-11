@@ -43,8 +43,23 @@ if "google_sheets_manager" not in st.session_state:
     try:
         # Primeiro tenta usar Streamlit secrets (Streamlit Cloud)
         if "GOOGLE_CREDENTIALS" in st.secrets:
-            credentials = dict(st.secrets["GOOGLE_CREDENTIALS"])
-            manager = GoogleSheetsManager(credentials)
+            # Tenta converter para dict ou usar como está
+            secrets_creds = st.secrets["GOOGLE_CREDENTIALS"]
+            
+            # Se for string JSON, converte para dict
+            if isinstance(secrets_creds, str) and secrets_creds.strip().startswith("{"):
+                try:
+                    secrets_creds = json.loads(secrets_creds)
+                except:
+                    pass # Deixa como string se falhar
+            
+            # Se for objeto de secrets, converte para dict
+            if hasattr(secrets_creds, "to_dict"):
+                secrets_creds = secrets_creds.to_dict()
+            elif not isinstance(secrets_creds, (dict, str)):
+                secrets_creds = dict(secrets_creds)
+
+            manager = GoogleSheetsManager(secrets_creds)
             if manager.connected:
                 st.session_state.google_sheets_manager = manager
                 st.info("✅ Conectado via Streamlit Secrets")
@@ -64,6 +79,8 @@ if "google_sheets_manager" not in st.session_state:
     except Exception as e:
         st.session_state.google_sheets_manager = None
         st.error(f"⚠️ Erro ao conectar Google Sheets: {str(e)}")
+        # Debug info (opcional, remover em produção se expor dados sensíveis)
+        # st.write(f"Tipo do erro: {type(e)}")
         import traceback
         st.code(traceback.format_exc())
 

@@ -36,11 +36,20 @@ class GoogleSheetsManager:
                 self.gc = gspread.authorize(creds)
                 
             elif isinstance(credentials_json, str):
-                # Se for uma string (caminho do arquivo)
-                creds = Credentials.from_service_account_file(credentials_json, scopes=scopes)
+                # Verifica se é uma string JSON ou um caminho de arquivo
+                if credentials_json.strip().startswith("{"):
+                    # É uma string JSON
+                    info = json.loads(credentials_json)
+                    if "private_key" in info:
+                        info["private_key"] = info["private_key"].replace("\\n", "\n")
+                    creds = Credentials.from_service_account_info(info, scopes=scopes)
+                else:
+                    # É um caminho de arquivo
+                    creds = Credentials.from_service_account_file(credentials_json, scopes=scopes)
+                
                 self.gc = gspread.authorize(creds)
             else:
-                raise ValueError("credentials_json deve ser um dicionário ou caminho de arquivo")
+                raise ValueError(f"Tipo de credencial inválido: {type(credentials_json)}")
             
             self.spreadsheet = self.gc.open_by_key(SPREADSHEET_ID)
             self.connected = True
