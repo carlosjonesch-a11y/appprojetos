@@ -44,12 +44,20 @@ if "google_sheets_manager" not in st.session_state:
         # Primeiro tenta usar Streamlit secrets (Streamlit Cloud)
         if "GOOGLE_CREDENTIALS" in st.secrets:
             credentials = dict(st.secrets["GOOGLE_CREDENTIALS"])
-            st.session_state.google_sheets_manager = GoogleSheetsManager(credentials)
-            st.info("✅ Conectado via Streamlit Secrets")
+            manager = GoogleSheetsManager(credentials)
+            if manager.connected:
+                st.session_state.google_sheets_manager = manager
+                st.info("✅ Conectado via Streamlit Secrets")
+            else:
+                st.session_state.google_sheets_manager = None
         # Se não houver secrets, tenta arquivo local (desenvolvimento)
         elif os.path.exists("credentials.json"):
-            st.session_state.google_sheets_manager = GoogleSheetsManager("credentials.json")
-            st.info("✅ Conectado via credentials.json local")
+            manager = GoogleSheetsManager("credentials.json")
+            if manager.connected:
+                st.session_state.google_sheets_manager = manager
+                st.info("✅ Conectado via credentials.json local")
+            else:
+                st.session_state.google_sheets_manager = None
         else:
             st.session_state.google_sheets_manager = None
             st.warning("⚠️ Credenciais não encontradas. Configure as secrets no Streamlit Cloud.")

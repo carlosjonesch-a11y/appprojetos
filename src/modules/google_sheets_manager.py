@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 import streamlit as st
+from google.oauth2.service_account import Credentials
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 
 # ID da planilha Google Sheets
@@ -20,12 +21,24 @@ class GoogleSheetsManager:
             credentials_json: Caminho do arquivo de credenciais JSON ou dict com as credenciais
         """
         try:
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+
             if isinstance(credentials_json, dict):
                 # Se for um dicionário (vindo de Streamlit secrets)
-                self.gc = gspread.service_account_from_dict(credentials_json)
+                # Corrige formatação da chave privada se necessário
+                if "private_key" in credentials_json:
+                    credentials_json["private_key"] = credentials_json["private_key"].replace("\\n", "\n")
+                
+                creds = Credentials.from_service_account_info(credentials_json, scopes=scopes)
+                self.gc = gspread.authorize(creds)
+                
             elif isinstance(credentials_json, str):
                 # Se for uma string (caminho do arquivo)
-                self.gc = gspread.service_account(filename=credentials_json)
+                creds = Credentials.from_service_account_file(credentials_json, scopes=scopes)
+                self.gc = gspread.authorize(creds)
             else:
                 raise ValueError("credentials_json deve ser um dicionário ou caminho de arquivo")
             
