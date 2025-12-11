@@ -73,6 +73,18 @@ if "demanda_em_edicao" not in st.session_state:
 if "projeto_em_edicao" not in st.session_state:
     st.session_state.projeto_em_edicao = None
 
+# Carregar dados automaticamente na primeira execução
+if "dados_carregados" not in st.session_state:
+    st.session_state.dados_carregados = False
+    if st.session_state.google_sheets_manager:
+        try:
+            st.session_state.projetos = st.session_state.google_sheets_manager.load_projetos()
+            st.session_state.demandas = st.session_state.google_sheets_manager.load_demandas()
+            st.session_state.etapas = st.session_state.google_sheets_manager.load_etapas()
+            st.session_state.dados_carregados = True
+        except Exception as e:
+            st.warning(f"⚠️ Erro ao carregar dados: {str(e)[:100]}")
+
 # ============= FUNÇÕES AUXILIARES =============
 
 def carregar_dados():
