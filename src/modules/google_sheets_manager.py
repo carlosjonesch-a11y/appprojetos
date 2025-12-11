@@ -52,14 +52,46 @@ class GoogleSheetsManager:
                     
                     from google.auth import crypt
                     from google.oauth2 import service_account
+                    # Debug: tipos/infos da chave
+                    try:
+                        pk_debug = creds_dict.get("private_key")
+                        print("DEBUG: private_key tipo (antes):", type(pk_debug))
+                        if isinstance(pk_debug, str):
+                            print("DEBUG: private_key sample (masked):", "<masked-start>" + pk_debug[:20] + "...")
+                            print("DEBUG: private_key length:", len(pk_debug))
+                    except Exception:
+                        pass
                     
                     if "private_key" in creds_dict and "client_email" in creds_dict:
                         pk = creds_dict["private_key"]
-                        # Garante que é bytes
+                        # Transform to bytes if needed
                         if isinstance(pk, str):
-                            pk = pk.encode("utf-8")
-                        
-                        signer = crypt.RSASigner.from_string(pk)
+                            pk_bytes = pk.encode("utf-8")
+                        else:
+                            pk_bytes = pk
+                        # Debug: confirmar tipo
+                        print("DEBUG: pk_bytes type:", type(pk_bytes), "len:", len(pk_bytes) if hasattr(pk_bytes, '__len__') else 'n/a')
+                        # Try original crypt.RSASigner.from_string first
+                        try:
+                            signer = crypt.RSASigner.from_string(pk_bytes)
+                        except Exception as exc_signer:
+                            print("DEBUG: RSASigner.from_string failed:", exc_signer)
+                            # Try to load with cryptography and create a simple signer wrapper
+                            try:
+                                from cryptography.hazmat.primitives.serialization import load_pem_private_key
+                                from cryptography.hazmat.primitives.asymmetric import padding
+                                from cryptography.hazmat.primitives import hashes
+                                private_key_obj = load_pem_private_key(pk_bytes, password=None)
+                                class SignerWrapper:
+                                    def __init__(self, keyobj):
+                                        self._keyobj = keyobj
+                                    def sign(self, message):
+                                        return self._keyobj.sign(message, padding.PKCS1v15(), hashes.SHA256())
+                                signer = SignerWrapper(private_key_obj)
+                                print("DEBUG: SignerWrapper criado com sucesso usando cryptography")
+                            except Exception as exc_crypt:
+                                print("DEBUG: Fallback cryptography parsing falhou:", exc_crypt)
+                                raise
                         creds = service_account.Credentials(
                             signer,
                             service_account_email=creds_dict["client_email"],
