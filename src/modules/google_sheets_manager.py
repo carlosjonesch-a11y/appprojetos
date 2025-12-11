@@ -166,8 +166,12 @@ class GoogleSheetsManager:
             
             # Tenta pegar ID da planilha das secrets se disponível, senão usa o hardcoded
             sheet_id = SPREADSHEET_ID
-            if "SPREADSHEET_ID" in st.secrets:
-                sheet_id = st.secrets["SPREADSHEET_ID"]
+            try:
+                if "SPREADSHEET_ID" in st.secrets:
+                    sheet_id = st.secrets["SPREADSHEET_ID"]
+            except FileNotFoundError:
+                # No local Streamlit secrets file; keep default
+                pass
             
             self.spreadsheet = self.gc.open_by_key(sheet_id)
             self.connected = True
