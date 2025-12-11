@@ -48,7 +48,25 @@ class GoogleSheetsManager:
                     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
                 except Exception as e_std:
                     # Se falhar, tenta construção manual do Signer (Bypass para erro do pyasn1)
-                    print(f"DEBUG: Falha no método padrão: {e_std}. Tentando método manual...")
+                    print(f"DEBUG: Falha no método padrão: {e_std}. Tentando fallback por arquivo...")
+                    # Try file fallback first: write temp JSON and use from_service_account_file
+                    try:
+                        import tempfile, os
+                        tmpf = tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json', encoding='utf-8')
+                        json.dump(creds_dict, tmpf)
+                        tmpf.flush()
+                        tmpf.close()
+                        print(f"DEBUG: Escritor temporario criado em (early fallback): {tmpf.name}")
+                        creds = Credentials.from_service_account_file(tmpf.name, scopes=scopes)
+                        os.unlink(tmpf.name)
+                        self.gc = gspread.authorize(creds)
+                        self.connected = True
+                        print("DEBUG: Fallback por arquivo (early) funcionou")
+                        return
+                    except Exception as e_file_early:
+                        print('DEBUG: Early file fallback falhou:', e_file_early)
+                        # Continue to manual signer fallback
+                    print(f"DEBUG: Tentando método manual após fallback por arquivo falhado: {e_std}...")
                     
                     from google.auth import crypt
                     from google.oauth2 import service_account
