@@ -91,8 +91,6 @@ class GoogleSheetsManager:
                         
                         # Convert to bytes for parsing
                         pk_bytes = pk_sanitized.encode('utf-8')
-                        else:
-                            pk_bytes = pk
                         # Debug: confirmar tipo
                         print("DEBUG: pk_bytes type:", type(pk_bytes), "len:", len(pk_bytes) if hasattr(pk_bytes, '__len__') else 'n/a')
                         # Try original crypt.RSASigner.from_string first
