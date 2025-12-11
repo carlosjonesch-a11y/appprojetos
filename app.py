@@ -5,6 +5,7 @@ from datetime import datetime
 import os
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 from src.modules.google_sheets_manager import GoogleSheetsManager
+from src.modules.postgres_manager import PostgresManager
 from src.components.ui_components import (
     create_projeto_card, create_demanda_card, create_demanda_form,
     create_projeto_form, create_etapa_form
@@ -42,6 +43,25 @@ st.markdown("""
 # Inicialização do Google Sheets Manager PRIMEIRO
 if "google_sheets_manager" not in st.session_state:
     try:
+        # Prefer Postgres if configured in secrets (DATABASE_URL)
+        db_url = None
+        if "DATABASE_URL" in st.secrets:
+            db_url = st.secrets["DATABASE_URL"]
+        elif os.environ.get('DATABASE_URL'):
+            db_url = os.environ.get('DATABASE_URL')
+        if db_url:
+            try:
+                pgm = PostgresManager(db_url)
+                if pgm.connected:
+                    st.session_state.google_sheets_manager = pgm
+                    st.info("✅ Conectado via PostgreSQL (storage)")
+                    # Skip other credential checks
+                    st.session_state.storage_backend = 'postgres'
+            except Exception as e:
+                print(f"DEBUG: Falha ao conectar PostgreSQL: {e}")
+                st.session_state.google_sheets_manager = None
+        # If no Postgres or failed, fall back to other methods
+        if not st.session_state.get('google_sheets_manager'):
         secrets_creds = None
         
         # 1. Tenta chave específica GOOGLE_CREDENTIALS

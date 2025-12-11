@@ -9,4 +9,6 @@ Pillow==11.0.0
 plotly==5.24.1
 # Removido pin do pyasn1 para permitir resolucao automatica
 cryptography==41.0.3
+SQLAlchemy==2.0.24
+psycopg2-binary==2.9.7
 
