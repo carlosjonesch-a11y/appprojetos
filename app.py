@@ -342,6 +342,47 @@ if not st.session_state.google_sheets_manager:
     
     **Detalhes:** Veja `CONFIGURACAO_GOOGLE.md`
     """)
+
+    # DEBUG VISUAL (Movido para cá para garantir visibilidade)
+    with st.expander("🕵️ Debug de Credenciais (Clique aqui se não conecta)"):
+        st.write("### Diagnóstico de Secrets")
+        
+        # Verifica GOOGLE_CREDENTIALS
+        if "GOOGLE_CREDENTIALS" in st.secrets:
+            st.success("✅ Chave 'GOOGLE_CREDENTIALS' encontrada em st.secrets")
+            creds = st.secrets["GOOGLE_CREDENTIALS"]
+            st.write(f"**Tipo:** `{type(creds)}`")
+            
+            if isinstance(creds, dict) or hasattr(creds, "keys"):
+                st.write(f"**Chaves disponíveis:** `{list(creds.keys())}`")
+                if "private_key" in creds:
+                    pk = creds["private_key"]
+                    st.write(f"**Private Key (início):** `{pk[:25]}...`")
+                    st.write(f"**Contém quebra de linha real (\\n)?** {'✅ Sim' if '\n' in pk else '❌ Não'}")
+                    st.write(f"**Contém literal string (\\\\n)?** {'⚠️ Sim' if '\\n' in pk else '✅ Não'}")
+            elif isinstance(creds, str):
+                st.write("**Conteúdo é uma string.** Tentando parse JSON...")
+                try:
+                    import json
+                    parsed = json.loads(creds)
+                    st.success("✅ JSON válido!")
+                    st.write(f"**Chaves no JSON:** `{list(parsed.keys())}`")
+                except Exception as e:
+                    st.error(f"❌ Erro ao ler JSON: {e}")
+        
+        # Verifica estrutura plana
+        elif "type" in st.secrets and st.secrets["type"] == "service_account":
+            st.success("✅ Estrutura plana (TOML) detectada!")
+            st.write(f"**Chaves disponíveis:** `{list(st.secrets.keys())}`")
+            if "private_key" in st.secrets:
+                pk = st.secrets["private_key"]
+                st.write(f"**Private Key (início):** `{pk[:25]}...`")
+                st.write(f"**Contém quebra de linha real (\\n)?** {'✅ Sim' if '\n' in pk else '❌ Não'}")
+        
+        else:
+            st.error("❌ Nenhuma credencial encontrada em st.secrets")
+            st.write("Chaves disponíveis:", list(st.secrets.keys()))
+
 else:
     st.success("✅ Google Sheets conectado e pronto para sincronizar!")
 
