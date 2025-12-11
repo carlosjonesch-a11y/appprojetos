@@ -38,14 +38,38 @@ class GoogleSheetsManager:
 
             if isinstance(credentials_json, dict):
                 # Se for um dicionário (vindo de Streamlit secrets)
-                # Cria uma cópia para não modificar o original
                 creds_dict = dict(credentials_json)
                 
-                # Corrige formatação da chave privada se necessário
-                if "private_key" in creds_dict:
-                    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-                
-                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                # Tenta o método padrão primeiro, mas com tratamento especial para a chave
+                try:
+                    if "private_key" in creds_dict:
+                        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+                    
+                    creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                except Exception as e_std:
+                    # Se falhar, tenta construção manual do Signer (Bypass para erro do pyasn1)
+                    print(f"DEBUG: Falha no método padrão: {e_std}. Tentando método manual...")
+                    
+                    from google.auth import crypt
+                    from google.oauth2 import service_account
+                    
+                    if "private_key" in creds_dict and "client_email" in creds_dict:
+                        pk = creds_dict["private_key"]
+                        # Garante que é bytes
+                        if isinstance(pk, str):
+                            pk = pk.encode("utf-8")
+                        
+                        signer = crypt.RSASigner.from_string(pk)
+                        creds = service_account.Credentials(
+                            signer,
+                            service_account_email=creds_dict["client_email"],
+                            token_uri=creds_dict.get("token_uri", "https://oauth2.googleapis.com/token"),
+                            scopes=scopes,
+                            project_id=creds_dict.get("project_id")
+                        )
+                    else:
+                        raise e_std
+
                 self.gc = gspread.authorize(creds)
                 
             elif isinstance(credentials_json, str):

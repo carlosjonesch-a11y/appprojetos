@@ -7,6 +7,5 @@ python-dateutil==2.9.0
 streamlit-option-menu==0.3.13
 Pillow==11.0.0
 plotly==5.24.1
-# Fix para erro de autenticacao do Google
-pyasn1==0.5.1
-rsa==4.9
+# Removido pin do pyasn1 para permitir resolucao automatica
+
