@@ -96,11 +96,32 @@ if "google_sheets_manager" not in st.session_state:
             print("DEBUG: Nenhuma credencial encontrada em st.secrets ou credentials.json")
             print(f"DEBUG: Chaves disponíveis em st.secrets: {list(st.secrets.keys())}")
             st.warning("⚠️ Credenciais não encontradas. Configure as secrets no Streamlit Cloud.")
+            
+            # DEBUG VISUAL TEMPORÁRIO (Remover em produção)
+            with st.expander("🕵️ Debug de Credenciais (Seu app não está conectando)"):
+                st.write("Verificando secrets...")
+                if "GOOGLE_CREDENTIALS" in st.secrets:
+                    st.success("Chave 'GOOGLE_CREDENTIALS' encontrada!")
+                    creds = st.secrets["GOOGLE_CREDENTIALS"]
+                    st.write(f"Tipo: {type(creds)}")
+                    if isinstance(creds, dict) or hasattr(creds, "keys"):
+                        st.write(f"Chaves: {list(creds.keys())}")
+                        if "private_key" in creds:
+                            pk = creds["private_key"]
+                            st.write(f"Private Key começa com: {pk[:20]}...")
+                            st.write(f"Tem quebra de linha real? {'Sim' if '\n' in pk else 'Não'}")
+                            st.write(f"Tem barra-n literal? {'Sim' if '\\n' in pk else 'Não'}")
+                elif "type" in st.secrets and st.secrets["type"] == "service_account":
+                    st.success("Estrutura plana encontrada!")
+                else:
+                    st.error("Nenhuma chave válida encontrada em st.secrets")
+                    st.write("Chaves disponíveis:", list(st.secrets.keys()))
+
     except Exception as e:
         st.session_state.google_sheets_manager = None
         st.error(f"⚠️ Erro ao conectar Google Sheets: {str(e)}")
-        # Debug info (opcional, remover em produção se expor dados sensíveis)
-        # st.write(f"Tipo do erro: {type(e)}")
+        # Debug info
+        st.write(f"Tipo do erro: {type(e)}")
         import traceback
         st.code(traceback.format_exc())
 
