@@ -12,15 +12,23 @@ SPREADSHEET_ID = "1cyZg-dt1BR4K7pTKvx5o8rWKP7_uNHrDQDdlYedTQI0"
 class GoogleSheetsManager:
     """Gerenciador de integração com Google Sheets"""
     
-    def __init__(self, credentials_json: str):
+    def __init__(self, credentials_json=None):
         """
         Inicializa o gerenciador do Google Sheets
         
         Args:
-            credentials_json: Caminho do arquivo de credenciais JSON
+            credentials_json: Caminho do arquivo de credenciais JSON ou dict com as credenciais
         """
         try:
-            self.gc = gspread.service_account(filename=credentials_json)
+            if isinstance(credentials_json, dict):
+                # Se for um dicionário (vindo de Streamlit secrets)
+                self.gc = gspread.service_account_from_dict(credentials_json)
+            elif isinstance(credentials_json, str):
+                # Se for uma string (caminho do arquivo)
+                self.gc = gspread.service_account(filename=credentials_json)
+            else:
+                raise ValueError("credentials_json deve ser um dicionário ou caminho de arquivo")
+            
             self.spreadsheet = self.gc.open_by_key(SPREADSHEET_ID)
             self.connected = True
         except Exception as e:

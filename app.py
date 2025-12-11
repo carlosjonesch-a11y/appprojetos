@@ -49,15 +49,20 @@ if "etapas" not in st.session_state:
     st.session_state.etapas = []
 
 if "google_sheets_manager" not in st.session_state:
-    credentials_path = "credentials.json"
-    if os.path.exists(credentials_path):
-        try:
-            st.session_state.google_sheets_manager = GoogleSheetsManager(credentials_path)
-        except Exception as e:
+    try:
+        # Primeiro tenta usar Streamlit secrets (Streamlit Cloud)
+        if "GOOGLE_CREDENTIALS" in st.secrets:
+            credentials = dict(st.secrets["GOOGLE_CREDENTIALS"])
+            st.session_state.google_sheets_manager = GoogleSheetsManager(credentials)
+        # Se não houver secrets, tenta arquivo local (desenvolvimento)
+        elif os.path.exists("credentials.json"):
+            st.session_state.google_sheets_manager = GoogleSheetsManager("credentials.json")
+        else:
             st.session_state.google_sheets_manager = None
-            st.warning(f"⚠️ Erro ao conectar Google Sheets: {str(e)[:100]}")
-    else:
+            st.warning("⚠️ Credenciais não encontradas. Configure as secrets no Streamlit Cloud.")
+    except Exception as e:
         st.session_state.google_sheets_manager = None
+        st.warning(f"⚠️ Erro ao conectar Google Sheets: {str(e)[:100]}")
 
 if "modo_edicao" not in st.session_state:
     st.session_state.modo_edicao = False
