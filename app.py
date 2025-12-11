@@ -42,14 +42,20 @@ st.markdown("""
 # Inicialização do Google Sheets Manager PRIMEIRO
 if "google_sheets_manager" not in st.session_state:
     try:
-        # Primeiro tenta usar Streamlit secrets (Streamlit Cloud)
+        secrets_creds = None
+        
+        # 1. Tenta chave específica GOOGLE_CREDENTIALS
         if "GOOGLE_CREDENTIALS" in st.secrets:
-            # Tenta converter para dict ou usar como está
             secrets_creds = st.secrets["GOOGLE_CREDENTIALS"]
+            print(f"DEBUG: Encontrado GOOGLE_CREDENTIALS em secrets. Tipo: {type(secrets_creds)}")
             
-            # Debug: Logar tipo de credencial (sem expor dados)
-            print(f"DEBUG: Tipo de secrets['GOOGLE_CREDENTIALS']: {type(secrets_creds)}")
-            
+        # 2. Tenta verificar se as secrets são as próprias credenciais (estrutura plana)
+        # Isso acontece se o usuário colar o conteúdo do JSON direto no editor de secrets
+        elif "type" in st.secrets and st.secrets["type"] == "service_account":
+            secrets_creds = dict(st.secrets)
+            print("DEBUG: Encontrada estrutura plana de service_account em secrets")
+
+        if secrets_creds:
             # Se for string JSON, converte para dict
             if isinstance(secrets_creds, str):
                 secrets_creds = secrets_creds.strip()
@@ -75,6 +81,7 @@ if "google_sheets_manager" not in st.session_state:
                 st.info("✅ Conectado via Streamlit Secrets")
             else:
                 st.session_state.google_sheets_manager = None
+        
         # Se não houver secrets, tenta arquivo local (desenvolvimento)
         elif os.path.exists("credentials.json"):
             manager = GoogleSheetsManager("credentials.json")
@@ -85,6 +92,9 @@ if "google_sheets_manager" not in st.session_state:
                 st.session_state.google_sheets_manager = None
         else:
             st.session_state.google_sheets_manager = None
+            # Log para ajudar no debug
+            print("DEBUG: Nenhuma credencial encontrada em st.secrets ou credentials.json")
+            print(f"DEBUG: Chaves disponíveis em st.secrets: {list(st.secrets.keys())}")
             st.warning("⚠️ Credenciais não encontradas. Configure as secrets no Streamlit Cloud.")
     except Exception as e:
         st.session_state.google_sheets_manager = None
