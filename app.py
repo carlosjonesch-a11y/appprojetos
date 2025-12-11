@@ -1,5 +1,6 @@
 import streamlit as st
 import uuid
+import json
 from datetime import datetime
 import os
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
@@ -46,18 +47,27 @@ if "google_sheets_manager" not in st.session_state:
             # Tenta converter para dict ou usar como está
             secrets_creds = st.secrets["GOOGLE_CREDENTIALS"]
             
+            # Debug: Logar tipo de credencial (sem expor dados)
+            print(f"DEBUG: Tipo de secrets['GOOGLE_CREDENTIALS']: {type(secrets_creds)}")
+            
             # Se for string JSON, converte para dict
-            if isinstance(secrets_creds, str) and secrets_creds.strip().startswith("{"):
-                try:
-                    secrets_creds = json.loads(secrets_creds)
-                except:
-                    pass # Deixa como string se falhar
+            if isinstance(secrets_creds, str):
+                secrets_creds = secrets_creds.strip()
+                if secrets_creds.startswith("{"):
+                    try:
+                        secrets_creds = json.loads(secrets_creds)
+                    except Exception as e:
+                        print(f"DEBUG: Erro ao fazer parse do JSON: {e}")
+                        # Deixa como string se falhar, pode ser um caminho
             
             # Se for objeto de secrets, converte para dict
             if hasattr(secrets_creds, "to_dict"):
                 secrets_creds = secrets_creds.to_dict()
             elif not isinstance(secrets_creds, (dict, str)):
-                secrets_creds = dict(secrets_creds)
+                try:
+                    secrets_creds = dict(secrets_creds)
+                except:
+                    pass
 
             manager = GoogleSheetsManager(secrets_creds)
             if manager.connected:
