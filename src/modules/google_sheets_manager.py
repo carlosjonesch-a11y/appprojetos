@@ -43,7 +43,9 @@ class GoogleSheetsManager:
                 
                 # Corrige formatação da chave privada se necessário
                 if "private_key" in creds_dict:
-                    creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+                    pk = creds_dict["private_key"].replace("\\n", "\n")
+                    # Força conversão para bytes para evitar erro no pyasn1/google-auth
+                    creds_dict["private_key"] = pk.encode("utf-8")
                 
                 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
                 self.gc = gspread.authorize(creds)
@@ -54,7 +56,8 @@ class GoogleSheetsManager:
                     # É uma string JSON
                     info = json.loads(credentials_json)
                     if "private_key" in info:
-                        info["private_key"] = info["private_key"].replace("\\n", "\n")
+                        pk = info["private_key"].replace("\\n", "\n")
+                        info["private_key"] = pk.encode("utf-8")
                     creds = Credentials.from_service_account_info(info, scopes=scopes)
                 else:
                     # É um caminho de arquivo
