@@ -382,6 +382,33 @@ if not st.session_state.google_sheets_manager:
         else:
             st.error("❌ Nenhuma credencial encontrada em st.secrets")
             st.write("Chaves disponíveis:", list(st.secrets.keys()))
+        
+        # Verifica se houve erro na tentativa de conexão
+        if st.session_state.get("google_sheets_manager") is None:
+             # Tenta instanciar temporariamente para pegar o erro
+             try:
+                 if "GOOGLE_CREDENTIALS" in st.secrets:
+                     tmp_creds = st.secrets["GOOGLE_CREDENTIALS"]
+                 elif "type" in st.secrets and st.secrets["type"] == "service_account":
+                     tmp_creds = dict(st.secrets)
+                 else:
+                     tmp_creds = None
+                 
+                 if tmp_creds:
+                     # Conversão rápida igual ao código principal
+                     if hasattr(tmp_creds, "to_dict"): tmp_creds = tmp_creds.to_dict()
+                     elif not isinstance(tmp_creds, (dict, str)): tmp_creds = dict(tmp_creds)
+                     
+                     tmp_manager = GoogleSheetsManager(tmp_creds)
+                     if not tmp_manager.connected:
+                         st.error(f"❌ Erro retornado pelo Google Sheets: {tmp_manager.last_error}")
+                         if "404" in str(tmp_manager.last_error):
+                             st.warning("💡 Dica: Erro 404 geralmente significa que a planilha não existe ou não foi compartilhada com o email da conta de serviço.")
+                             st.info(f"Email da conta de serviço: {tmp_creds.get('client_email', 'Não encontrado')}")
+                         if "403" in str(tmp_manager.last_error):
+                             st.warning("💡 Dica: Erro 403 significa permissão negada. Verifique se a API do Google Sheets está ativada no console do Google Cloud.")
+             except Exception as e:
+                 st.error(f"Erro ao tentar diagnosticar conexão: {e}")
 
 else:
     st.success("✅ Google Sheets conectado e pronto para sincronizar!")

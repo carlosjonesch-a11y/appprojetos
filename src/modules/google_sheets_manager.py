@@ -20,6 +20,7 @@ class GoogleSheetsManager:
         Args:
             credentials_json: Caminho do arquivo de credenciais JSON ou dict com as credenciais
         """
+        self.last_error = None
         try:
             scopes = [
                 "https://www.googleapis.com/auth/spreadsheets",
@@ -51,9 +52,15 @@ class GoogleSheetsManager:
             else:
                 raise ValueError(f"Tipo de credencial inválido: {type(credentials_json)}")
             
-            self.spreadsheet = self.gc.open_by_key(SPREADSHEET_ID)
+            # Tenta pegar ID da planilha das secrets se disponível, senão usa o hardcoded
+            sheet_id = SPREADSHEET_ID
+            if "SPREADSHEET_ID" in st.secrets:
+                sheet_id = st.secrets["SPREADSHEET_ID"]
+            
+            self.spreadsheet = self.gc.open_by_key(sheet_id)
             self.connected = True
         except Exception as e:
+            self.last_error = str(e)
             st.error(f"Erro ao conectar ao Google Sheets: {e}")
             self.connected = False
     
