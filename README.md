@@ -73,7 +73,9 @@ O aplicativo será aberto em `http://localhost:8501`
 Se preferir não usar Google Sheets, você pode utilizar um banco Postgres para persistência dos dados.
 
 - Configure uma variável `DATABASE_URL` com a string de conexão do Postgres.
-    - Exemplo: `postgresql://user:password@host:5432/dbname`
+    - Exemplo (recomendado para compatibilidade): `postgresql+pg8000://user:password@host:5432/dbname`
+
+Nota: Em alguns ambientes (ex.: Streamlit Cloud) o pacote `psycopg2-binary` pode falhar ao ser compilado por falta de dependências do sistema (pg_config, bibliotecas de compilação). Para evitar problemas de build, recomendamos usar o driver puro-Python `pg8000` (especificado acima via `postgresql+pg8000://...`).
     - No Streamlit Cloud, adicione `DATABASE_URL` em `st.secrets` com a mesma string.
 - No app, vá em "Configurações (⚙️)" → "Backend de Armazenamento" e selecione `postgres`.
 
