@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, Text, JSON
+from sqlalchemy import create_engine, Column, String, Integer, Text, JSON, text, delete as sa_delete
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from typing import List
@@ -48,12 +48,42 @@ class EtapaModel(Base):
 class PostgresManager:
     def __init__(self, database_url: str):
         self.database_url = database_url
-        self.engine = create_engine(database_url)
-        Base.metadata.create_all(self.engine)
-        self.Session = sessionmaker(bind=self.engine)
-        self.connected = True
+        self.engine = None
+        self.Session = None
+        self.connected = False
+        self.last_error = None
+        # Try to create engine; if psycopg2 is missing on Windows, try pg8000 fallback
+        try:
+            self.engine = create_engine(database_url)
+            # Create sessionmaker only if engine is created
+            self.Session = sessionmaker(bind=self.engine)
+            Base.metadata.create_all(self.engine)
+            self.connected = True
+        except Exception as e:
+            # Store error; attempt driver fallback to pg8000 if possible
+            self.last_error = e
+            try:
+                if database_url.startswith('postgresql://') and '+pg8000' not in database_url:
+                    fallback_url = database_url.replace('postgresql://', 'postgresql+pg8000://')
+                elif database_url.startswith('postgresql+pg8000://'):
+                    fallback_url = database_url
+                elif database_url.startswith('postgresql+psycopg2://'):
+                    fallback_url = database_url.replace('postgresql+psycopg2://', 'postgresql+pg8000://')
+                else:
+                    fallback_url = 'postgresql+pg8000://' + database_url.split('://', 1)[-1]
+                self.engine = create_engine(fallback_url)
+                self.Session = sessionmaker(bind=self.engine)
+                Base.metadata.create_all(self.engine)
+                self.connected = True
+                self.database_url = fallback_url
+                self.last_error = None
+            except Exception as e2:
+                self.last_error = e2
+                self.connected = False
 
     def load_projetos(self) -> List[Projeto]:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
         session = self.Session()
         rows = session.query(ProjetoModel).all()
         projetos = []
@@ -74,6 +104,8 @@ class PostgresManager:
         return projetos
 
     def save_projetos(self, projetos: List[Projeto]):
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
         session = self.Session()
         try:
             for p in projetos:
@@ -97,6 +129,8 @@ class PostgresManager:
             session.close()
 
     def load_demandas(self) -> List[Demanda]:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
         session = self.Session()
         rows = session.query(DemandaModel).all()
         demandas = []
@@ -126,6 +160,8 @@ class PostgresManager:
         return demandas
 
     def save_demandas(self, demandas: List[Demanda]):
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
         session = self.Session()
         try:
             for d in demandas:
@@ -160,6 +196,8 @@ class PostgresManager:
             session.close()
 
     def load_etapas(self) -> List[Etapa]:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
         session = self.Session()
         rows = session.query(EtapaModel).all()
         etapas = []
@@ -170,6 +208,8 @@ class PostgresManager:
         return etapas
 
     def save_etapas(self, etapas: List[Etapa]):
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
         session = self.Session()
         try:
             for e in etapas:
@@ -186,6 +226,93 @@ class PostgresManager:
         except Exception as e:
             session.rollback()
             print('PostgresManager save_etapas error', e)
+            return False
+        finally:
+            session.close()
+
+    # ------------------------- Additional helpers -------------------------
+    def health_check(self) -> bool:
+        """Simple health check, executes SELECT 1 and returns True if OK."""
+        if not self.connected:
+            return False
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True
+        except Exception as e:
+            self.last_error = e
+            return False
+
+    def delete_projeto(self, projeto_id: str) -> bool:
+        """Delete a projeto by id from the database"""
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = session.get(ProjetoModel, projeto_id)
+            if obj:
+                session.delete(obj)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager delete_projeto error', e)
+            return False
+        finally:
+            session.close()
+
+    def delete_demanda(self, demanda_id: str) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = session.get(DemandaModel, demanda_id)
+            if obj:
+                session.delete(obj)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager delete_demanda error', e)
+            return False
+        finally:
+            session.close()
+
+    def delete_etapa(self, etapa_id: str) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = session.get(EtapaModel, etapa_id)
+            if obj:
+                session.delete(obj)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager delete_etapa error', e)
+            return False
+        finally:
+            session.close()
+
+    def clear_all(self) -> bool:
+        """Remove todos os registros das tabelas projetos, demandas e etapas."""
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            # Prefer using DELETE for compatibility (works on SQLite and Postgres)
+            session.execute(sa_delete(ProjetoModel))
+            session.execute(sa_delete(DemandaModel))
+            session.execute(sa_delete(EtapaModel))
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager clear_all error', e)
             return False
         finally:
             session.close()

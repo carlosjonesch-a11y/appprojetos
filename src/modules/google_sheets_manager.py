@@ -42,29 +42,29 @@ class GoogleSheetsManager:
 
                 # We will use the file-based approach as primary for dict-like credentials
                 # to avoid pyasn1/RA issues on Streamlit Cloud. This also normalizes the key.
-                try:
-                    # Normalize and sanitize private_key to safe PEM format
-                    if 'private_key' in creds_dict:
-                        pk_val = creds_dict['private_key']
-                        if isinstance(pk_val, (bytes, bytearray)):
-                            pk_str = pk_val.decode('utf-8')
-                        else:
-                            pk_str = str(pk_val)
-                        # Convert literal '\\n' sequences and windows CRLFs
-                        pk_str = pk_str.replace('\\r\\n', '\n').replace('\\r', '\n')
-                        pk_str = pk_str.replace('\\n', '\n')
-                        # strip spaces from lines and ensure begin/end lines exist
-                        lines = [l.strip() for l in pk_str.splitlines() if l.strip()]
-                        if lines and not lines[0].startswith('-----BEGIN'):
-                            # attempt to find the header
-                            joined = '\n'.join(lines)
-                            pos = joined.find('-----BEGIN')
-                            if pos != -1:
-                                joined = joined[pos:]
-                            pk_str = joined
-                        else:
-                            pk_str = '\n'.join(lines)
-                        creds_dict['private_key'] = pk_str
+                # primary file-based flow does not need an outer try here; fallbacks are handled separately
+                # Normalize and sanitize private_key to safe PEM format
+                if 'private_key' in creds_dict:
+                    pk_val = creds_dict['private_key']
+                    if isinstance(pk_val, (bytes, bytearray)):
+                        pk_str = pk_val.decode('utf-8')
+                    else:
+                        pk_str = str(pk_val)
+                    # Convert literal '\n' sequences and windows CRLFs
+                    pk_str = pk_str.replace('\\r\\n', '\n').replace('\\r', '\n')
+                    pk_str = pk_str.replace('\\n', '\n')
+                    # strip spaces from lines and ensure begin/end lines exist
+                    lines = [l.strip() for l in pk_str.splitlines() if l.strip()]
+                    if lines and not lines[0].startswith('-----BEGIN'):
+                        # attempt to find the header
+                        joined = '\n'.join(lines)
+                        pos = joined.find('-----BEGIN')
+                        if pos != -1:
+                            joined = joined[pos:]
+                        pk_str = joined
+                    else:
+                        pk_str = '\n'.join(lines)
+                    creds_dict['private_key'] = pk_str
 
                     # Write creds to a temp file and use from_service_account_file — this avoids
                     # the pyasn1 string vs file issues of google-auth in some linux/Python builds.
@@ -189,7 +189,7 @@ class GoogleSheetsManager:
                             project_id=creds_dict.get("project_id")
                         )
                     else:
-                        raise e_std
+                        raise ValueError("Credenciais incompletas: 'private_key' ou 'client_email' não encontrado")
 
                 self.gc = gspread.authorize(creds)
                 

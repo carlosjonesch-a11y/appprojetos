@@ -40,7 +40,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Inicialização do Google Sheets Manager PRIMEIRO
+# Inicialização do Google Sheets Manager / Storage Backend (PRIMEIRO)
+# Define um backend padrão se ainda não especificado
+if "storage_backend" not in st.session_state:
+    st.session_state.storage_backend = st.session_state.get('storage_backend', 'local')
 if "google_sheets_manager" not in st.session_state:
     try:
         # Prefer Postgres if configured in secrets (DATABASE_URL)
@@ -98,6 +101,7 @@ if "google_sheets_manager" not in st.session_state:
             manager = GoogleSheetsManager(secrets_creds)
             if manager.connected:
                 st.session_state.google_sheets_manager = manager
+                st.session_state.storage_backend = 'google'
                 st.info("✅ Conectado via Streamlit Secrets")
             else:
                 st.session_state.google_sheets_manager = None
@@ -107,11 +111,14 @@ if "google_sheets_manager" not in st.session_state:
             manager = GoogleSheetsManager("credentials.json")
             if manager.connected:
                 st.session_state.google_sheets_manager = manager
+                st.session_state.storage_backend = 'google'
                 st.info("✅ Conectado via credentials.json local")
             else:
                 st.session_state.google_sheets_manager = None
         else:
             st.session_state.google_sheets_manager = None
+            # Default to local storage when no cloud backend is available
+            st.session_state.storage_backend = st.session_state.get('storage_backend', 'local')
             # Log para ajudar no debug
             print("DEBUG: Nenhuma credencial encontrada em st.secrets ou credentials.json")
             print(f"DEBUG: Chaves disponíveis em st.secrets: {list(st.secrets.keys())}")
@@ -185,28 +192,46 @@ if "projeto_em_edicao" not in st.session_state:
 # ============= FUNÇÕES AUXILIARES =============
 
 def carregar_dados():
-    """Carrega dados do Google Sheets"""
-    if st.session_state.google_sheets_manager:
-        try:
-            with st.spinner("Carregando dados..."):
-                st.session_state.projetos = st.session_state.google_sheets_manager.load_projetos()
-                st.session_state.demandas = st.session_state.google_sheets_manager.load_demandas()
-                st.session_state.etapas = st.session_state.google_sheets_manager.load_etapas()
-            st.success("Dados carregados com sucesso!")
-        except Exception as e:
-            st.error(f"Erro ao carregar dados: {e}")
+    """Carrega dados do backend selecionado"""
+    backend = st.session_state.get('storage_backend', 'local')
+    if backend == 'local':
+        st.info("Usando armazenamento local. Nenhuma sincronização remota realizada.")
+        return
+
+    mgr = st.session_state.get('google_sheets_manager')
+    if not mgr:
+        st.error("Nenhum gerenciador de backend disponível para carregar dados.")
+        return
+
+    try:
+        with st.spinner("Carregando dados..."):
+            st.session_state.projetos = mgr.load_projetos()
+            st.session_state.demandas = mgr.load_demandas()
+            st.session_state.etapas = mgr.load_etapas()
+        st.success("Dados carregados com sucesso!")
+    except Exception as e:
+        st.error(f"Erro ao carregar dados: {e}")
 
 def salvar_dados():
-    """Salva dados no Google Sheets"""
-    if st.session_state.google_sheets_manager:
-        try:
-            with st.spinner("Salvando dados..."):
-                st.session_state.google_sheets_manager.save_projetos(st.session_state.projetos)
-                st.session_state.google_sheets_manager.save_demandas(st.session_state.demandas)
-                st.session_state.google_sheets_manager.save_etapas(st.session_state.etapas)
-            st.success("Dados salvos com sucesso!")
-        except Exception as e:
-            st.error(f"Erro ao salvar dados: {e}")
+    """Salva dados no backend selecionado"""
+    backend = st.session_state.get('storage_backend', 'local')
+    if backend == 'local':
+        st.info("Dados mantidos apenas localmente (sem sincronização remota).")
+        return
+
+    mgr = st.session_state.get('google_sheets_manager')
+    if not mgr:
+        st.error("Nenhum gerenciador de backend disponível para salvar dados.")
+        return
+
+    try:
+        with st.spinner("Salvando dados..."):
+            mgr.save_projetos(st.session_state.projetos)
+            mgr.save_demandas(st.session_state.demandas)
+            mgr.save_etapas(st.session_state.etapas)
+        st.success("Dados salvos com sucesso!")
+    except Exception as e:
+        st.error(f"Erro ao salvar dados: {e}")
 
 def criar_projeto(dados_form: dict):
     """Cria um novo projeto"""
@@ -237,8 +262,17 @@ def editar_projeto(projeto_id: str, dados_form: dict):
 
 def deletar_projeto(projeto_id: str):
     """Deleta um projeto"""
+    # Remove locally
     st.session_state.projetos = [p for p in st.session_state.projetos if p.id != projeto_id]
     st.session_state.demandas = [d for d in st.session_state.demandas if d.projeto_id != projeto_id]
+    # If using Postgres backend, delete from DB as well
+    if st.session_state.get('storage_backend') == 'postgres' and st.session_state.get('google_sheets_manager'):
+        try:
+            deleted = st.session_state.google_sheets_manager.delete_projeto(projeto_id)
+            if deleted:
+                st.info('Projeto excluído do banco Postgres')
+        except Exception as e:
+            st.warning(f'Falha ao excluir do Postgres: {str(e)}')
     salvar_dados()
     st.success("Projeto deletado com sucesso!")
 
@@ -288,6 +322,13 @@ def criar_demanda(dados_form: dict, demanda_id: str = None):
 def deletar_demanda(demanda_id: str):
     """Deleta uma demanda"""
     st.session_state.demandas = [d for d in st.session_state.demandas if d.id != demanda_id]
+    if st.session_state.get('storage_backend') == 'postgres' and st.session_state.get('google_sheets_manager'):
+        try:
+            deleted = st.session_state.google_sheets_manager.delete_demanda(demanda_id)
+            if deleted:
+                st.info('Demanda excluída do banco Postgres')
+        except Exception as e:
+            st.warning(f'Falha ao excluir demanda do Postgres: {str(e)}')
     salvar_dados()
     st.success("Demanda deletada com sucesso!")
 
@@ -327,6 +368,13 @@ def criar_etapa(dados_form: dict, etapa_id: str = None):
 def deletar_etapa(etapa_id: str):
     """Deleta uma etapa"""
     st.session_state.etapas = [e for e in st.session_state.etapas if e.id != etapa_id]
+    if st.session_state.get('storage_backend') == 'postgres' and st.session_state.get('google_sheets_manager'):
+        try:
+            deleted = st.session_state.google_sheets_manager.delete_etapa(etapa_id)
+            if deleted:
+                st.info('Etapa excluída do banco Postgres')
+        except Exception as e:
+            st.warning(f'Falha ao excluir etapa do Postgres: {str(e)}')
     salvar_dados()
     st.success("Etapa deletada com sucesso!")
 
@@ -340,11 +388,15 @@ with col1:
     st.markdown("*Organize suas demandas com eficiência e rastreie o progresso em tempo real*")
 
 with col2:
-    if st.button("🔄 Sincronizar Google Sheets"):
+    if st.button("🔄 Sincronizar"):
         carregar_dados()
+    # Mostrar backend atual
+    storage_backend = st.session_state.get('storage_backend', 'local')
+    st.caption(f"Backend atual: {storage_backend}")
 
-# Verificação de credenciais
-if not st.session_state.google_sheets_manager:
+storage_backend = st.session_state.get('storage_backend', 'local')
+
+if storage_backend == 'google' and not st.session_state.get('google_sheets_manager'):
     st.warning("""
     ⚠️ **Google Sheets não configurado**
     
@@ -439,8 +491,13 @@ if not st.session_state.google_sheets_manager:
              except Exception as e:
                  st.error(f"Erro ao tentar diagnosticar conexão: {e}")
 
+elif storage_backend == 'postgres' and not st.session_state.get('google_sheets_manager'):
+    st.warning("⚠️ Postgres selecionado como backend, mas não foi possível conectar ao DATABASE_URL configurado.")
+    st.write("Verifique as configurações de `st.secrets[\"DATABASE_URL\"]` ou a variável de ambiente `DATABASE_URL`.")
+elif storage_backend == 'local':
+    st.info("🔒 Usando armazenamento local. Nenhuma sincronização remota configurada.")
 else:
-    st.success("✅ Google Sheets conectado e pronto para sincronizar!")
+    st.success("✅ Backend remoto conectado e pronto para sincronizar!")
 
 st.markdown("---")
 
@@ -713,12 +770,15 @@ with tab4:
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Google Sheets")
-        if st.button("🔄 Carregar dados do Google Sheets"):
-            carregar_dados()
-        
-        if st.button("💾 Salvar dados no Google Sheets"):
-            salvar_dados()
+        st.subheader("Sincronização Remota")
+        backend = st.session_state.get('storage_backend', 'local')
+        if backend == 'local':
+            st.info("Nenhum backend remoto configurado. Selecione Postgres ou Google Sheets nas configurações.")
+        else:
+            if st.button("🔄 Carregar dados remotos"):
+                carregar_dados()
+            if st.button("💾 Salvar dados remotos"):
+                salvar_dados()
     
     with col2:
         st.subheader("Dados Locais")
@@ -732,6 +792,159 @@ with tab4:
                 st.rerun()
     
     st.markdown("---")
+
+    # Storage Backend Selector
+    st.subheader("🔁 Backend de Armazenamento")
+    # Detect available options
+    available_backends = ["local"]
+    try:
+        db_url = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else os.environ.get('DATABASE_URL')
+    except Exception:
+        db_url = os.environ.get('DATABASE_URL')
+    if db_url:
+        available_backends.insert(0, "postgres")
+
+    # detect google availability
+    google_possible = False
+    if "GOOGLE_CREDENTIALS" in st.secrets or ("type" in st.secrets and st.secrets.get("type") == "service_account") or os.path.exists("credentials.json"):
+        google_possible = True
+    if google_possible:
+        available_backends.insert(0, "google")
+
+    # default selection
+    if "storage_backend" not in st.session_state:
+        st.session_state.storage_backend = st.session_state.get('storage_backend', 'local')
+
+    sel = st.selectbox("Escolha o backend de armazenamento:", options=available_backends, index=available_backends.index(st.session_state.storage_backend) if st.session_state.storage_backend in available_backends else 0)
+    if sel != st.session_state.storage_backend:
+        st.session_state.storage_backend = sel
+        # Try to initialize the selected backend if required
+        if sel == 'postgres':
+            try:
+                db_url = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else os.environ.get('DATABASE_URL')
+                pgm = PostgresManager(db_url)
+                if pgm.connected:
+                    st.session_state.google_sheets_manager = pgm
+                    st.success("✅ Postgres configurado e conectado")
+                else:
+                    st.session_state.google_sheets_manager = None
+                    st.error("❌ Não foi possível conectar ao Postgres")
+            except Exception as e:
+                st.session_state.google_sheets_manager = None
+                st.error(f"❌ Erro ao conectar Postgres: {e}")
+        elif sel == 'google':
+            # Try to initialize the Google manager from secrets or local file
+            try:
+                if "GOOGLE_CREDENTIALS" in st.secrets:
+                    secrets_creds = st.secrets["GOOGLE_CREDENTIALS"]
+                    manager = GoogleSheetsManager(secrets_creds)
+                    if manager.connected:
+                        st.session_state.google_sheets_manager = manager
+                        st.success("✅ Google Sheets configurado e conectado")
+                    else:
+                        st.session_state.google_sheets_manager = None
+                        st.error("❌ Não foi possível conectar ao Google Sheets")
+                elif os.path.exists("credentials.json"):
+                    manager = GoogleSheetsManager("credentials.json")
+                    if manager.connected:
+                        st.session_state.google_sheets_manager = manager
+                        st.success("✅ Google Sheets configurado e conectado via arquivo local")
+                    else:
+                        st.session_state.google_sheets_manager = None
+                        st.error("❌ Não foi possível conectar ao Google Sheets via arquivo local")
+                else:
+                    st.error("Nenhuma credencial do Google encontrada. Configure st.secrets ou coloque credentials.json")
+            except Exception as e:
+                st.session_state.google_sheets_manager = None
+                st.error(f"❌ Erro ao conectar Google Sheets: {e}")
+        else:
+            st.session_state.google_sheets_manager = None
+            st.success("🔒 Usando armazenamento local")
+    # Extra: botão de testar conexão para Postgres
+    if st.session_state.storage_backend == 'postgres':
+        db_url = None
+        try:
+            db_url = st.secrets.get("DATABASE_URL") if "DATABASE_URL" in st.secrets else os.environ.get('DATABASE_URL')
+        except Exception:
+            db_url = os.environ.get('DATABASE_URL')
+
+        def _mask_db_url(url: str) -> str:
+            if not url:
+                return 'Nenhum DATABASE_URL configurado'
+            try:
+                # simples mascaramento: substitui senha entre : and @ por ***
+                import re
+                return re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', url)
+            except Exception:
+                return '***'
+
+        st.write("**DATABASE_URL:**", _mask_db_url(db_url))
+        if st.button("🔍 Testar conexão Postgres"):
+            try:
+                if not db_url:
+                    st.error('DATABASE_URL não encontrado em st.secrets nem em variáveis de ambiente')
+                else:
+                    pgm = PostgresManager(db_url)
+                    if pgm.connected:
+                        # Show driver used
+                        driver = getattr(pgm.engine, 'dialect', None)
+                        driver_name = getattr(driver, 'name', None) if driver else None
+                        ok = pgm.health_check() if hasattr(pgm, 'health_check') else False
+                        if ok:
+                            try:
+                                n = len(pgm.load_projetos())
+                                st.success(f'Conexão bem-sucedida! Driver: {driver_name} — Projetos carregados: {n}')
+                            except Exception as e:
+                                st.warning('Conectado, mas falha ao carregar dados: ' + str(e))
+                        else:
+                            st.error('Conectado ao driver, mas health_check falhou. Erro: ' + str(pgm.last_error))
+                    else:
+                        st.error('Falha ao conectar ao Postgres: ' + str(pgm.last_error))
+            # Admin - limpar dados remotos
+            st.markdown("---")
+            st.subheader("⚠️ Admin: Limpar dados remotos")
+            st.write("ATENÇÃO: Esta ação irá remover todos os registros do backend remoto selecionado.")
+            st.write("Digite CONFIRMAR para ativar o botão de exclusão.")
+            confirm_token = st.text_input("Digite CONFIRMAR para confirmar exclusão do banco:", value="", max_chars=20)
+            if confirm_token == "CONFIRMAR":
+                if st.button("🧹 Limpar dados remotos (CONFIRMAR)"):
+                    try:
+                        if st.session_state.storage_backend == 'postgres' and st.session_state.get('google_sheets_manager'):
+                            pm = st.session_state.get('google_sheets_manager')
+                            ok = pm.clear_all()
+                            if ok:
+                                st.success('Dados do Postgres limpos com sucesso')
+                                st.session_state.projetos = []
+                                st.session_state.demandas = []
+                                st.session_state.etapas = []
+                            else:
+                                st.error('Falha ao limpar dados do Postgres')
+                        elif st.session_state.storage_backend == 'google' and st.session_state.get('google_sheets_manager'):
+                            gsm = st.session_state.get('google_sheets_manager')
+                            st.session_state.projetos = []
+                            st.session_state.demandas = []
+                            st.session_state.etapas = []
+                            try:
+                                gsm.save_projetos([])
+                                gsm.save_demandas([])
+                                gsm.save_etapas([])
+                                st.success('Dados do Google Sheets limpos com sucesso')
+                            except Exception as e:
+                                st.error('Falha ao salvar/limpar Google Sheets: ' + str(e))
+                        else:
+                            # Local cleanup
+                            st.session_state.projetos = []
+                            st.session_state.demandas = []
+                            st.session_state.etapas = []
+                            st.success('Dados locais limpos com sucesso')
+                    except Exception as e:
+                        st.error('Erro ao limpar dados remotos: ' + str(e))
+                        import traceback
+                        st.code(traceback.format_exc())
+            except Exception as e:
+                import traceback
+                st.error('Erro ao testar conexão: ' + str(e))
+                st.code(traceback.format_exc())
     
     st.subheader("Sobre o Aplicativo")
     st.markdown("""

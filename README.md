@@ -68,6 +68,17 @@ streamlit run app.py
 
 O aplicativo será aberto em `http://localhost:8501`
 
+### Alternativa de Armazenamento: Postgres
+
+Se preferir não usar Google Sheets, você pode utilizar um banco Postgres para persistência dos dados.
+
+- Configure uma variável `DATABASE_URL` com a string de conexão do Postgres.
+    - Exemplo: `postgresql://user:password@host:5432/dbname`
+    - No Streamlit Cloud, adicione `DATABASE_URL` em `st.secrets` com a mesma string.
+- No app, vá em "Configurações (⚙️)" → "Backend de Armazenamento" e selecione `postgres`.
+
+Se `DATABASE_URL` não estiver configurada, o app continuará usando armazenamento local (em memória) ou Google Sheets, caso as credenciais estejam configuradas.
+
 ## 📁 Estrutura do Projeto
 
 ```
@@ -125,8 +136,8 @@ Três sub-abas:
 - Delete etapas
 
 ### Configurações (Aba 4)
-- Sincronize com Google Sheets
-- Salve dados no Google Sheets
+- Selecione o backend de armazenamento (Google Sheets, Postgres ou Local)
+- Sincronize e salve dados no backend remoto selecionado
 - Limpe dados locais
 - Informações sobre o aplicativo
 
