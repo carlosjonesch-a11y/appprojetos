@@ -1,0 +1,4 @@
+id,nome,descricao,status,responsavel,data_criacao,data_conclusao
+proj_1,Portal Interno,Portal para acessos internos,Ativo,Enrico,2024-01-01,
+proj_2,Aplicativo Mobile,App mobile para pedidos,Ativo,Carlos,2024-02-15,2024-12-30
+proj_3,Relatórios BI,Bi dashboard e relatórios,Ativo,Ana,2024-03-10,
