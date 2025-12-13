@@ -2,9 +2,10 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from uuid import uuid4
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 from src.modules.postgres_manager import PostgresManager
-from src.components.ui_components2 import create_demanda_form_v2
+from src.components.ui_components2 import create_demanda_form_v2, create_projeto_form, create_etapa_form
 from src.modules.kanban import KanbanView, DashboardMetrics
 from src.modules.gantt import GanttChart
 
@@ -33,6 +34,17 @@ def _get_database_url() -> str:
     except Exception:
         pass
     return ""
+
+
+def _get_secret_value(key: str) -> str:
+    env_val = os.getenv(key)
+    if env_val:
+        return env_val
+    try:
+        secret_val = st.secrets[key]
+        return str(secret_val) if secret_val is not None else ""
+    except Exception:
+        return ""
 
 
 # Database URL (Postgres)
@@ -83,7 +95,7 @@ def adicionar_projeto(nome: str, descricao: str, data_criacao: str, data_conclus
     """Adiciona um novo projeto à lista e ao banco de dados."""
     try:
         novo_projeto = Projeto(
-            id=f"proj_{len(st.session_state.projetos) + 1}",
+            id=f"proj_{uuid4().hex}",
             nome=nome,
             descricao=descricao,
             data_criacao=data_criacao,
@@ -127,12 +139,16 @@ def editar_projeto(projeto_id: str, nome: str, descricao: str, data_criacao: str
 def deletar_projeto(projeto_id: str) -> bool:
     """Deleta um projeto."""
     try:
+        demandas_para_remover = [d for d in st.session_state.demandas if d.projeto_id == projeto_id]
+
         st.session_state.projetos = [p for p in st.session_state.projetos if p.id != projeto_id]
         st.session_state.demandas = [d for d in st.session_state.demandas if d.projeto_id != projeto_id]
-        
+
         if st.session_state.db_connected:
-            st.session_state.db_manager.save_projetos(st.session_state.projetos)
-            st.session_state.db_manager.save_demandas(st.session_state.demandas)
+            # Remover dependências (demandas) e depois o projeto
+            for d in demandas_para_remover:
+                st.session_state.db_manager.delete_demanda(d.id)
+            st.session_state.db_manager.delete_projeto(projeto_id)
         
         return True
     except Exception as e:
@@ -142,7 +158,7 @@ def deletar_projeto(projeto_id: str) -> bool:
 def adicionar_demanda_from_dict(data: dict) -> bool:
     """Adiciona nova demanda a partir de dict com campos completos."""
     try:
-        new_id = data.get('id') or f"dem_{len(st.session_state.demandas) + 1}"
+        new_id = data.get('id') or f"dem_{uuid4().hex}"
         nova_demanda = Demanda(
             id=new_id,
             titulo=data.get('titulo', ''),
@@ -234,12 +250,9 @@ def deletar_demanda(demanda_id: str) -> bool:
     """Deleta uma demanda."""
     try:
         st.session_state.demandas = [d for d in st.session_state.demandas if d.id != demanda_id]
-        # Etapas são independentes de demandas no modelo atual; não deletar etapas ao remover uma demanda
-        # Caso quisesse remover etapas órfãs, poderíamos filtrar por etapas que não aparecem em nenhuma demanda
-        
+
         if st.session_state.db_connected:
-            st.session_state.db_manager.save_demandas(st.session_state.demandas)
-            st.session_state.db_manager.save_etapas(st.session_state.etapas)
+            st.session_state.db_manager.delete_demanda(demanda_id)
         
         return True
     except Exception as e:
@@ -275,7 +288,7 @@ def adicionar_etapa(demanda_id: str, titulo: str, descricao: str, data_venciment
     """Adiciona uma nova etapa e, opcionalmente, associa à demanda (via demanda.etapa_id)."""
     try:
         nova_etapa = Etapa(
-            id=f"eta_{len(st.session_state.etapas) + 1}",
+            id=f"eta_{uuid4().hex}",
             nome=titulo,
             descricao=descricao,
             ordem=0,
@@ -303,9 +316,14 @@ def deletar_etapa(etapa_id: str) -> bool:
     """Deleta uma etapa."""
     try:
         st.session_state.etapas = [e for e in st.session_state.etapas if e.id != etapa_id]
-        
+        # desassociar etapa de demandas que apontavam para ela
+        for i, d in enumerate(st.session_state.demandas):
+            if d.etapa_id == etapa_id:
+                st.session_state.demandas[i].etapa_id = None
+
         if st.session_state.db_connected:
-            st.session_state.db_manager.save_etapas(st.session_state.etapas)
+            st.session_state.db_manager.delete_etapa(etapa_id)
+            st.session_state.db_manager.save_demandas(st.session_state.demandas)
         
         return True
     except Exception as e:
@@ -346,7 +364,7 @@ with st.sidebar:
         st.rerun()
 
 # Main Tabs
-tab1, tab2, tab3 = st.tabs(["📈 Dashboard", "🎯 Kanban", "⚙️ Configurações"])
+tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "🎯 Kanban", "⚙️ Configurações", "🛠️ Gerenciar"])
 
 # ============================================================================
 # TAB 1: DASHBOARD
@@ -478,6 +496,209 @@ with tab3:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao limpar banco: {e}")
+
+# ============================================================================
+# TAB 4: GERENCIAR (ADMIN)
+# ============================================================================
+with tab4:
+    st.subheader("🛠️ Gerenciar (Cadastro)")
+
+    if not st.session_state.get("db_connected", False):
+        st.warning("Conecte o app ao PostgreSQL (DATABASE_URL) para cadastrar dados e persistir na nuvem.")
+        st.stop()
+
+    admin_password = _get_secret_value("ADMIN_PASSWORD")
+    if not admin_password:
+        st.warning(
+            "A área de cadastro está protegida. Para habilitar, crie `ADMIN_PASSWORD` em Settings → Secrets (Streamlit Cloud)."
+        )
+        st.stop()
+
+    if "admin_ok" not in st.session_state:
+        st.session_state.admin_ok = False
+
+    if not st.session_state.admin_ok:
+        pwd = st.text_input("Senha de administrador", type="password", key="admin_pwd")
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("Entrar", key="admin_login"):
+                st.session_state.admin_ok = pwd == admin_password
+                if not st.session_state.admin_ok:
+                    st.error("Senha inválida.")
+                else:
+                    st.rerun()
+        st.stop()
+
+    col1, col2 = st.columns([1, 4])
+    with col1:
+        if st.button("Sair", key="admin_logout"):
+            st.session_state.admin_ok = False
+            st.session_state.pop("admin_pwd", None)
+            st.rerun()
+
+    st.markdown("---")
+
+    # -------------------- PROJETOS --------------------
+    st.markdown("### 📁 Projetos")
+    proj_mode = st.radio("Ação", ["Criar", "Editar"], horizontal=True, key="admin_proj_mode")
+
+    if proj_mode == "Criar":
+        proj_form = create_projeto_form(None)
+        if st.button("Salvar Projeto", key="admin_proj_create"):
+            novo = Projeto(
+                id=f"proj_{uuid4().hex}",
+                nome=proj_form.get("nome", ""),
+                descricao=proj_form.get("descricao", ""),
+                status=proj_form.get("status") or StatusEnum.TODO.value,
+                responsavel=proj_form.get("responsavel") or "",
+                data_criacao=datetime.now().strftime("%Y-%m-%d"),
+                data_conclusao=proj_form.get("data_conclusao"),
+            )
+            st.session_state.projetos.append(novo)
+            st.session_state.db_manager.save_projetos(st.session_state.projetos)
+            st.success("Projeto criado.")
+            st.rerun()
+    else:
+        if not st.session_state.projetos:
+            st.info("Nenhum projeto cadastrado ainda.")
+        else:
+            proj_id = st.selectbox(
+                "Selecione um projeto",
+                options=[p.id for p in st.session_state.projetos],
+                format_func=lambda x: next((p.nome for p in st.session_state.projetos if p.id == x), x),
+                key="admin_proj_select",
+            )
+            projeto = next((p for p in st.session_state.projetos if p.id == proj_id), None)
+            if projeto:
+                proj_form = create_projeto_form(projeto)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Atualizar Projeto", key="admin_proj_update"):
+                        for i, p in enumerate(st.session_state.projetos):
+                            if p.id == projeto.id:
+                                st.session_state.projetos[i] = Projeto(
+                                    id=projeto.id,
+                                    nome=proj_form.get("nome", projeto.nome),
+                                    descricao=proj_form.get("descricao", projeto.descricao),
+                                    status=proj_form.get("status", projeto.status),
+                                    responsavel=proj_form.get("responsavel", projeto.responsavel),
+                                    data_criacao=projeto.data_criacao,
+                                    data_conclusao=proj_form.get("data_conclusao", projeto.data_conclusao),
+                                )
+                                break
+                        st.session_state.db_manager.save_projetos(st.session_state.projetos)
+                        st.success("Projeto atualizado.")
+                        st.rerun()
+                with c2:
+                    if st.button("Excluir Projeto", key="admin_proj_delete"):
+                        deletar_projeto(projeto.id)
+                        st.success("Projeto excluído.")
+                        st.rerun()
+
+    st.markdown("---")
+
+    # -------------------- ETAPAS --------------------
+    st.markdown("### 🧩 Etapas")
+    etapa_mode = st.radio("Ação", ["Criar", "Editar"], horizontal=True, key="admin_etapa_mode")
+    if etapa_mode == "Criar":
+        etapa_form = create_etapa_form(None)
+        if st.button("Salvar Etapa", key="admin_etapa_create"):
+            nova = Etapa(
+                id=f"eta_{uuid4().hex}",
+                nome=etapa_form.get("nome", ""),
+                descricao=etapa_form.get("descricao", ""),
+                ordem=int(etapa_form.get("ordem") or 0),
+                data_criacao=datetime.now().strftime("%Y-%m-%d"),
+            )
+            st.session_state.etapas.append(nova)
+            st.session_state.db_manager.save_etapas(st.session_state.etapas)
+            st.success("Etapa criada.")
+            st.rerun()
+    else:
+        if not st.session_state.etapas:
+            st.info("Nenhuma etapa cadastrada ainda.")
+        else:
+            etapa_id = st.selectbox(
+                "Selecione uma etapa",
+                options=[e.id for e in st.session_state.etapas],
+                format_func=lambda x: next((e.nome for e in st.session_state.etapas if e.id == x), x),
+                key="admin_etapa_select",
+            )
+            etapa = next((e for e in st.session_state.etapas if e.id == etapa_id), None)
+            if etapa:
+                etapa_form = create_etapa_form(etapa)
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Atualizar Etapa", key="admin_etapa_update"):
+                        for i, e in enumerate(st.session_state.etapas):
+                            if e.id == etapa.id:
+                                st.session_state.etapas[i] = Etapa(
+                                    id=etapa.id,
+                                    nome=etapa_form.get("nome", etapa.nome),
+                                    descricao=etapa_form.get("descricao", etapa.descricao),
+                                    ordem=int(etapa_form.get("ordem", etapa.ordem) or 0),
+                                    data_criacao=etapa.data_criacao,
+                                )
+                                break
+                        st.session_state.db_manager.save_etapas(st.session_state.etapas)
+                        st.success("Etapa atualizada.")
+                        st.rerun()
+                with c2:
+                    if st.button("Excluir Etapa", key="admin_etapa_delete"):
+                        deletar_etapa(etapa.id)
+                        st.success("Etapa excluída.")
+                        st.rerun()
+
+    st.markdown("---")
+
+    # -------------------- DEMANDAS --------------------
+    st.markdown("### 📝 Demandas")
+    if not st.session_state.projetos:
+        st.warning("Crie pelo menos 1 projeto antes de cadastrar demandas.")
+        st.stop()
+
+    dem_mode = st.radio("Ação", ["Criar", "Editar"], horizontal=True, key="admin_dem_mode")
+    if dem_mode == "Criar":
+        data = create_demanda_form_v2(
+            st.session_state.projetos,
+            st.session_state.etapas,
+            demanda=None,
+            key_prefix="admin_new_dem",
+        )
+        if st.button("Salvar Demanda", key="admin_dem_create"):
+            data["id"] = f"dem_{uuid4().hex}"
+            if adicionar_demanda_from_dict(data):
+                st.success("Demanda criada.")
+                st.rerun()
+    else:
+        if not st.session_state.demandas:
+            st.info("Nenhuma demanda cadastrada ainda.")
+        else:
+            dem_id = st.selectbox(
+                "Selecione uma demanda",
+                options=[d.id for d in st.session_state.demandas],
+                format_func=lambda x: next((d.titulo for d in st.session_state.demandas if d.id == x), x),
+                key="admin_dem_select",
+            )
+            demanda = next((d for d in st.session_state.demandas if d.id == dem_id), None)
+            if demanda:
+                data = create_demanda_form_v2(
+                    st.session_state.projetos,
+                    st.session_state.etapas,
+                    demanda=demanda,
+                    key_prefix=f"admin_edit_{demanda.id}",
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Atualizar Demanda", key="admin_dem_update"):
+                        if editar_demanda_from_dict(demanda.id, data):
+                            st.success("Demanda atualizada.")
+                            st.rerun()
+                with c2:
+                    if st.button("Excluir Demanda", key="admin_dem_delete"):
+                        if deletar_demanda(demanda.id):
+                            st.success("Demanda excluída.")
+                            st.rerun()
 
 # ============================================================================
 # FOOTER
