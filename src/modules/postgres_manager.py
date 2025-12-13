@@ -1,4 +1,7 @@
+import ssl
+
 from sqlalchemy import create_engine, Column, String, Integer, Text, JSON, text, delete as sa_delete
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from typing import List
@@ -52,34 +55,70 @@ class PostgresManager:
         self.Session = None
         self.connected = False
         self.last_error = None
-        # Try to create engine; if psycopg2 is missing on Windows, try pg8000 fallback
+
+        # Try to create engine; normaliza driver para pg8000 e aplica SSL quando necessário
         try:
-            self.engine = create_engine(database_url)
+            engine, effective_url = self._create_engine(database_url)
+            self.engine = engine
             # Create sessionmaker only if engine is created
             self.Session = sessionmaker(bind=self.engine)
             Base.metadata.create_all(self.engine)
             self.connected = True
+            self.database_url = effective_url
         except Exception as e:
-            # Store error; attempt driver fallback to pg8000 if possible
+            # Store error; attempt a best-effort fallback
             self.last_error = e
             try:
-                if database_url.startswith('postgresql://') and '+pg8000' not in database_url:
-                    fallback_url = database_url.replace('postgresql://', 'postgresql+pg8000://')
-                elif database_url.startswith('postgresql+pg8000://'):
-                    fallback_url = database_url
-                elif database_url.startswith('postgresql+psycopg2://'):
-                    fallback_url = database_url.replace('postgresql+psycopg2://', 'postgresql+pg8000://')
-                else:
-                    fallback_url = 'postgresql+pg8000://' + database_url.split('://', 1)[-1]
-                self.engine = create_engine(fallback_url)
+                fallback_url = 'postgresql+pg8000://' + database_url.split('://', 1)[-1]
+                engine, effective_url = self._create_engine(fallback_url)
+                self.engine = engine
                 self.Session = sessionmaker(bind=self.engine)
                 Base.metadata.create_all(self.engine)
                 self.connected = True
-                self.database_url = fallback_url
+                self.database_url = effective_url
                 self.last_error = None
             except Exception as e2:
                 self.last_error = e2
                 self.connected = False
+
+    def _create_engine(self, database_url: str):
+        """Cria engine SQLAlchemy para Postgres com pg8000.
+
+        - Normaliza URLs do tipo postgresql:// para postgresql+pg8000://
+        - Converte postgresql+psycopg2:// para postgresql+pg8000://
+        - Trata sslmode/ssl em query string (comum em Neon/Supabase) e aplica ssl_context.
+        """
+
+        url = make_url(database_url)
+
+        # Normalizar driver
+        if url.drivername in {"postgresql", "postgres"}:
+            url = url.set(drivername="postgresql+pg8000")
+        elif url.drivername.startswith("postgresql+") and "pg8000" not in url.drivername:
+            url = url.set(drivername="postgresql+pg8000")
+
+        query = dict(url.query or {})
+
+        sslmode = query.pop("sslmode", None)
+        ssl_param = query.pop("ssl", None)
+
+        need_ssl = False
+        if sslmode is not None and str(sslmode).strip().lower() not in {"disable", "allow"}:
+            need_ssl = True
+        if ssl_param is not None and str(ssl_param).strip().lower() in {"1", "true", "yes", "require"}:
+            need_ssl = True
+        if url.host and url.host not in {"localhost", "127.0.0.1"}:
+            need_ssl = True
+
+        if query != dict(url.query or {}):
+            url = url.set(query=query)
+
+        connect_args = {}
+        if need_ssl:
+            connect_args["ssl_context"] = ssl.create_default_context()
+
+        engine = create_engine(url, connect_args=connect_args)
+        return engine, str(url)
 
     def load_projetos(self) -> List[Projeto]:
         if not self.connected:
