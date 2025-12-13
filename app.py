@@ -32,28 +32,32 @@ def _get_database_url() -> str:
             return secrets_url
     except Exception:
         pass
-    return "postgresql+pg8000://postgres:!Enrico18@localhost:5432/jones"
+    return ""
 
 
 # Database URL (Postgres)
 DATABASE_URL = _get_database_url()
 
-# Initialize PostgresManager
-if "db_manager" not in st.session_state:
-    st.session_state.db_manager = PostgresManager(DATABASE_URL)
+# Initialize PostgresManager (apenas se houver DATABASE_URL)
+if not DATABASE_URL:
+    st.session_state.db_connected = False
+    st.session_state.db_error = "DATABASE_URL não configurado. Defina em variáveis de ambiente ou em Secrets do Streamlit Cloud."
+else:
+    if "db_manager" not in st.session_state:
+        st.session_state.db_manager = PostgresManager(DATABASE_URL)
 
-# Test connection on startup
-if "db_connected" not in st.session_state:
-    try:
-        health = st.session_state.db_manager.health_check()
-        # `health_check` returns a boolean; be defensive if an object returned
-        if isinstance(health, bool):
-            st.session_state.db_connected = health
-        else:
-            st.session_state.db_connected = bool(health.get("connected", False)) if isinstance(health, dict) else bool(health)
-    except Exception as e:
-        st.session_state.db_connected = False
-        st.session_state.db_error = str(e)
+    # Test connection on startup
+    if "db_connected" not in st.session_state:
+        try:
+            health = st.session_state.db_manager.health_check()
+            # `health_check` returns a boolean; be defensive if an object returned
+            if isinstance(health, bool):
+                st.session_state.db_connected = health
+            else:
+                st.session_state.db_connected = bool(health.get("connected", False)) if isinstance(health, dict) else bool(health)
+        except Exception as e:
+            st.session_state.db_connected = False
+            st.session_state.db_error = str(e)
 
 # Load data from Postgres
 if st.session_state.db_connected:
