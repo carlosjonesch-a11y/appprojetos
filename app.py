@@ -582,11 +582,33 @@ with tab2:
             st.error(f"Erro ao deletar demanda: {e}")
     
     if st.session_state.demandas:
+        # Filtros
+        f1, f2 = st.columns(2)
+        with f1:
+            projeto_opt = st.selectbox(
+                "Projeto",
+                options=["Todos"] + [p.id for p in st.session_state.projetos],
+                format_func=lambda x: "Todos" if x == "Todos" else next((p.nome for p in st.session_state.projetos if p.id == x), x),
+                key="kanban_filter_projeto",
+            )
+        with f2:
+            etapa_opt = st.selectbox(
+                "Etapa",
+                options=["Todas"] + [e.id for e in st.session_state.etapas],
+                format_func=lambda x: "Todas" if x == "Todas" else next((e.nome for e in st.session_state.etapas if e.id == x), x),
+                key="kanban_filter_etapa",
+            )
+
+        filtro_projeto = None if projeto_opt == "Todos" else projeto_opt
+        filtro_etapa = None if etapa_opt == "Todas" else etapa_opt
+
         KanbanView.render_kanban(
             st.session_state.demandas,
             on_status_change=_on_status_change,
             on_edit=_on_edit,
             on_delete=_on_delete,
+            filtro_projeto=filtro_projeto,
+            filtro_etapa=filtro_etapa,
             projetos=st.session_state.projetos,
             etapas=st.session_state.etapas,
             on_edit_save=editar_demanda_from_dict

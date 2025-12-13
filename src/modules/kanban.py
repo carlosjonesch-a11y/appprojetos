@@ -12,6 +12,7 @@ class KanbanView:
         on_edit: Optional[Callable] = None,
         on_delete: Optional[Callable] = None,
         filtro_projeto: Optional[str] = None,
+        filtro_etapa: Optional[str] = None,
         filtro_responsavel: Optional[str] = None,
         projetos: Optional[List] = None,
         etapas: Optional[List] = None,
@@ -33,6 +34,8 @@ class KanbanView:
         demandas_filtradas = demandas
         if filtro_projeto:
             demandas_filtradas = [d for d in demandas_filtradas if d.projeto_id == filtro_projeto]
+        if filtro_etapa:
+            demandas_filtradas = [d for d in demandas_filtradas if getattr(d, 'etapa_id', None) == filtro_etapa]
         if filtro_responsavel:
             demandas_filtradas = [d for d in demandas_filtradas if d.responsavel == filtro_responsavel]
         

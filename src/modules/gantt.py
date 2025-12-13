@@ -14,6 +14,26 @@ class GanttChart:
         """Parse date string para datetime object (apenas data, sem hora)"""
         if not date_str:
             return datetime.now().date()
+
+    @staticmethod
+    def _etapas_por_ordem(etapas: List[Etapa]) -> List[Etapa]:
+        def _key(e: Etapa):
+            try:
+                ordem = int(getattr(e, "ordem", 0) or 0)
+            except Exception:
+                ordem = 0
+            return (ordem, (getattr(e, "nome", "") or "").lower())
+
+        return sorted(etapas or [], key=_key)
+
+    @staticmethod
+    def _sort_demandas_por_datas(demandas: List[Demanda]) -> List[Demanda]:
+        def _key(d: Demanda):
+            ini = GanttChart._parse_date(getattr(d, "data_inicio_plano", None) or getattr(d, "data_criacao", None))
+            fim = GanttChart._parse_date(getattr(d, "data_vencimento_plano", None) or getattr(d, "data_vencimento", None))
+            return (ini, fim, (getattr(d, "titulo", "") or "").lower())
+
+        return sorted(demandas or [], key=_key)
         
         try:
             if isinstance(date_str, str):
@@ -71,7 +91,11 @@ class GanttChart:
             if st.session_state.gantt_level == 'demandas' and st.session_state.selected_projeto:
                 # Filtrar etapas do projeto selecionado
                 proj_id = next((p.id for p in projetos if p.nome == st.session_state.selected_projeto), None)
-                etapas_do_proj = sorted(list(set([e.nome for e in etapas if any(d.etapa_id == e.id and d.projeto_id == proj_id for d in demandas)])))
+                etapas_objs = [
+                    e for e in (etapas or [])
+                    if any(d.etapa_id == e.id and d.projeto_id == proj_id for d in demandas)
+                ]
+                etapas_do_proj = [e.nome for e in GanttChart._etapas_por_ordem(etapas_objs)]
                 etapas_options = ["🔄 Selecionar Tudo"] + etapas_do_proj
                 selected_etapa_option = st.selectbox(
                     "📋 Etapa",
@@ -175,7 +199,10 @@ class GanttChart:
         etapas_map = {e.id: e.nome for e in etapas}
         tarefas = []
         
-        for etapa_id in sorted(set(d.etapa_id for d in demandas_proj if d.etapa_id)):
+        etapas_map = {e.id: e.nome for e in etapas}
+        etapas_ordem_map = {e.id: (int(getattr(e, "ordem", 0) or 0), (getattr(e, "nome", "") or "").lower()) for e in (etapas or [])}
+
+        for etapa_id in sorted(set(d.etapa_id for d in demandas_proj if d.etapa_id), key=lambda eid: etapas_ordem_map.get(eid, (9999, etapas_map.get(eid, "")))):
             demandas_etapa = [d for d in demandas_proj if d.etapa_id == etapa_id]
             
             etapa_nome = etapas_map.get(etapa_id, "Sem Etapa")
@@ -226,7 +253,7 @@ class GanttChart:
         # Preparar tarefas
         tarefas = []
         
-        for demanda in demandas_filtradas:
+        for demanda in GanttChart._sort_demandas_por_datas(demandas_filtradas):
             data_ini = GanttChart._parse_date(demanda.data_inicio_plano or demanda.data_criacao)
             data_fim = GanttChart._parse_date(demanda.data_vencimento_plano)
             
@@ -273,15 +300,16 @@ class GanttChart:
         # Preparar tarefas agrupadas por etapa
         tarefas = []
         etapas_map = {e.id: e.nome for e in etapas}
+        etapas_ordem_map = {e.id: (int(getattr(e, "ordem", 0) or 0), (getattr(e, "nome", "") or "").lower()) for e in (etapas or [])}
         
         # Agrupar por etapa
-        for etapa_id in sorted(set(d.etapa_id for d in demandas_filtradas if d.etapa_id)):
+        for etapa_id in sorted(set(d.etapa_id for d in demandas_filtradas if d.etapa_id), key=lambda eid: etapas_ordem_map.get(eid, (9999, etapas_map.get(eid, "")))):
             etapa_nome = etapas_map.get(etapa_id, "Sem Etapa")
             
             # Adicionar header de etapa
             demandas_etapa = [d for d in demandas_filtradas if d.etapa_id == etapa_id]
-            
-            for demanda in demandas_etapa:
+
+            for demanda in GanttChart._sort_demandas_por_datas(demandas_etapa):
                 data_ini = GanttChart._parse_date(demanda.data_inicio_plano or demanda.data_criacao)
                 data_fim = GanttChart._parse_date(demanda.data_vencimento_plano)
                 
