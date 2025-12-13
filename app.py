@@ -180,7 +180,7 @@ def _compute_project_delay_risk(projetos, demandas):
                 "demandas_abertas": open_count,
                 "demandas_vencidas": overdue_open,
                 "data_prevista_fim": projected_finish.isoformat() if projected_finish else "",
-                "dias_previstos_atraso": int(delay_days) if delay_days is not None else "",
+                "dias_previstos_atraso": int(delay_days) if delay_days is not None else None,
                 "risco": risk_level,
                 "tendência": tendencia,
                 "_risk_score": float(score),
@@ -189,6 +189,9 @@ def _compute_project_delay_risk(projetos, demandas):
 
     df = pd.DataFrame(rows)
     if not df.empty:
+        # Garantir compatibilidade com Arrow (st.dataframe) evitando mistura str/int
+        if "dias_previstos_atraso" in df.columns:
+            df["dias_previstos_atraso"] = pd.to_numeric(df["dias_previstos_atraso"], errors="coerce").astype("Int64")
         df = df.sort_values(["tendência", "_risk_score", "dias_previstos_atraso", "demandas_vencidas"], ascending=[True, False, False, False])
         df = df.drop(columns=["_risk_score"], errors="ignore")
     return df

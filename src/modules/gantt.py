@@ -12,8 +12,28 @@ class GanttChart:
     @staticmethod
     def _parse_date(date_str):
         """Parse date string para datetime object (apenas data, sem hora)"""
-        if not date_str:
-            return datetime.now().date()
+        today = datetime.now().date()
+
+        # Trata None / NaN / NaT e outros valores problemáticos que podem vir do Postgres/pandas
+        if date_str is None:
+            return today
+        try:
+            if pd.isna(date_str):
+                return today
+        except Exception:
+            pass
+
+        try:
+            # Strings ISO (ou outras) -> Timestamp -> date
+            if isinstance(date_str, str):
+                date_str = date_str.replace('Z', '+00:00')
+
+            ts = pd.to_datetime(date_str, errors="coerce")
+            if pd.isna(ts):
+                return today
+            return ts.date()
+        except Exception:
+            return today
 
     @staticmethod
     def _etapas_por_ordem(etapas: List[Etapa]) -> List[Etapa]:
