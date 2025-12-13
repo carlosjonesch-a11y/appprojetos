@@ -8,6 +8,7 @@ from src.modules.postgres_manager import PostgresManager
 from src.components.ui_components2 import create_demanda_form_v2, create_projeto_form, create_etapa_form
 from src.modules.kanban import KanbanView, DashboardMetrics
 from src.modules.gantt import GanttChart
+from src.modules.checklist import ChecklistView
 
 # ============================================================================
 # PAGE CONFIGURATION
@@ -364,7 +365,7 @@ with st.sidebar:
         st.rerun()
 
 # Main Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "🎯 Kanban", "⚙️ Configurações", "🛠️ Gerenciar"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dashboard", "🎯 Kanban", "⚙️ Configurações", "🛠️ Gerenciar", "✅ Check-list"])
 
 # ============================================================================
 # TAB 1: DASHBOARD
@@ -699,6 +700,12 @@ with tab4:
                         if deletar_demanda(demanda.id):
                             st.success("Demanda excluída.")
                             st.rerun()
+
+# ============================================================================
+# TAB 5: CHECK-LIST (SEM PERSISTÊNCIA)
+# ============================================================================
+with tab5:
+    ChecklistView.render()
 
 # ============================================================================
 # FOOTER
