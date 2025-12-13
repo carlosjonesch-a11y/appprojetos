@@ -101,6 +101,8 @@ class PostgresManager:
 
         sslmode = query.pop("sslmode", None)
         ssl_param = query.pop("ssl", None)
+        # Parâmetro típico do libpq/psql; pg8000 não reconhece
+        query.pop("channel_binding", None)
 
         need_ssl = False
         if sslmode is not None and str(sslmode).strip().lower() not in {"disable", "allow"}:
