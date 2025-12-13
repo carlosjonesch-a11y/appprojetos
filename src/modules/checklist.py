@@ -172,7 +172,7 @@ class ChecklistView:
                 task_text = task.get("texto", "")
                 done = bool(task.get("concluida"))
 
-                row = st.columns([0.12, 0.62, 0.26])
+                row = st.columns([0.78, 0.22])
                 checkbox_key = f"ctk_done_{task_id}"
 
                 if checkbox_key not in st.session_state:
@@ -180,7 +180,7 @@ class ChecklistView:
 
                 with row[0]:
                     st.checkbox(
-                        "",
+                        task_text,
                         key=checkbox_key,
                         value=bool(st.session_state.get(checkbox_key)),
                         on_change=ChecklistView._toggle_task_done,
@@ -188,12 +188,6 @@ class ChecklistView:
                     )
 
                 with row[1]:
-                    if bool(st.session_state.get(checkbox_key)):
-                        st.markdown(f"- ~~{task_text}~~")
-                    else:
-                        st.markdown(f"- {task_text}")
-
-                with row[2]:
                     if bool(st.session_state.get(checkbox_key)):
                         st.button(
                             "Deletar do banco",

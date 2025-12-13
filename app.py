@@ -58,6 +58,11 @@ if not DATABASE_URL:
 else:
     if "db_manager" not in st.session_state:
         st.session_state.db_manager = PostgresManager(DATABASE_URL)
+    else:
+        # Se o app foi atualizado, a instância pode ter ficado com uma classe antiga em memória.
+        # Recriar evita AttributeError para novos recursos (ex.: checklist persistido).
+        if not hasattr(st.session_state.db_manager, "load_checklist_topics"):
+            st.session_state.db_manager = PostgresManager(DATABASE_URL)
 
     # Test connection on startup
     if "db_connected" not in st.session_state:
