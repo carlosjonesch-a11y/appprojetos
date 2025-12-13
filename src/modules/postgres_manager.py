@@ -1,6 +1,6 @@
 import ssl
 
-from sqlalchemy import create_engine, Column, String, Integer, Text, JSON, text, delete as sa_delete
+from sqlalchemy import create_engine, Column, String, Integer, Text, JSON, Boolean, text, delete as sa_delete
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -46,6 +46,22 @@ class EtapaModel(Base):
     nome = Column(String(255), nullable=False)
     descricao = Column(Text)
     ordem = Column(Integer)
+    data_criacao = Column(String(64))
+
+
+class ChecklistTopicModel(Base):
+    __tablename__ = 'checklist_topics'
+    id = Column(String(64), primary_key=True)
+    nome = Column(String(255), nullable=False)
+    data_criacao = Column(String(64))
+
+
+class ChecklistTaskModel(Base):
+    __tablename__ = 'checklist_tasks'
+    id = Column(String(64), primary_key=True)
+    topic_id = Column(String(64), nullable=False)
+    texto = Column(Text, nullable=False)
+    concluida = Column(Boolean, default=False)
     data_criacao = Column(String(64))
 
 class PostgresManager:
@@ -354,6 +370,135 @@ class PostgresManager:
         except Exception as e:
             session.rollback()
             print('PostgresManager clear_all error', e)
+            return False
+        finally:
+            session.close()
+
+    # ------------------------- Checklist helpers -------------------------
+    def load_checklist_topics(self) -> list[dict]:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            rows = session.query(ChecklistTopicModel).order_by(ChecklistTopicModel.data_criacao.asc()).all()
+            return [{"id": r.id, "nome": r.nome, "data_criacao": r.data_criacao} for r in rows]
+        finally:
+            session.close()
+
+    def create_checklist_topic(self, topic_id: str, nome: str, data_criacao: str) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = ChecklistTopicModel(id=topic_id, nome=nome, data_criacao=data_criacao)
+            session.add(obj)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager create_checklist_topic error', e)
+            return False
+        finally:
+            session.close()
+
+    def rename_checklist_topic(self, topic_id: str, novo_nome: str) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = session.get(ChecklistTopicModel, topic_id)
+            if not obj:
+                return False
+            obj.nome = novo_nome
+            session.add(obj)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager rename_checklist_topic error', e)
+            return False
+        finally:
+            session.close()
+
+    def load_checklist_tasks(self, topic_id: str) -> list[dict]:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            rows = (
+                session.query(ChecklistTaskModel)
+                .filter(ChecklistTaskModel.topic_id == topic_id)
+                .order_by(ChecklistTaskModel.data_criacao.asc())
+                .all()
+            )
+            return [
+                {
+                    "id": r.id,
+                    "topic_id": r.topic_id,
+                    "texto": r.texto,
+                    "concluida": bool(r.concluida),
+                    "data_criacao": r.data_criacao,
+                }
+                for r in rows
+            ]
+        finally:
+            session.close()
+
+    def create_checklist_task(self, task_id: str, topic_id: str, texto: str, data_criacao: str) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = ChecklistTaskModel(
+                id=task_id,
+                topic_id=topic_id,
+                texto=texto,
+                concluida=False,
+                data_criacao=data_criacao,
+            )
+            session.add(obj)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager create_checklist_task error', e)
+            return False
+        finally:
+            session.close()
+
+    def set_checklist_task_done(self, task_id: str, done: bool) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = session.get(ChecklistTaskModel, task_id)
+            if not obj:
+                return False
+            obj.concluida = bool(done)
+            session.add(obj)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager set_checklist_task_done error', e)
+            return False
+        finally:
+            session.close()
+
+    def delete_checklist_task(self, task_id: str) -> bool:
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            obj = session.get(ChecklistTaskModel, task_id)
+            if obj:
+                session.delete(obj)
+                session.commit()
+                return True
+            return False
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager delete_checklist_task error', e)
             return False
         finally:
             session.close()
