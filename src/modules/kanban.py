@@ -12,7 +12,10 @@ class KanbanView:
         on_edit: Optional[Callable] = None,
         on_delete: Optional[Callable] = None,
         filtro_projeto: Optional[str] = None,
-        filtro_responsavel: Optional[str] = None
+        filtro_responsavel: Optional[str] = None,
+        projetos: Optional[List] = None,
+        etapas: Optional[List] = None,
+        on_edit_save: Optional[Callable] = None
     ):
         """
         Renderiza um kanban com colunas de status
@@ -41,6 +44,10 @@ class KanbanView:
             if demanda.status in demandas_por_status:
                 demandas_por_status[demanda.status].append(demanda)
         
+        # Ensure projetos / etapas available
+        projetos = projetos or st.session_state.get('projetos', [])
+        etapas = etapas or st.session_state.get('etapas', [])
+
         # Renderiza colunas
         cols = st.columns(len(status_list))
         
@@ -80,7 +87,8 @@ class KanbanView:
                                 on_status_change,
                                 on_edit,
                                 on_delete,
-                                status_list
+                                status_list,
+                                projetos, etapas, on_edit_save
                             )
     
     @staticmethod
@@ -92,7 +100,7 @@ class KanbanView:
         on_edit: Optional[Callable],
         on_delete: Optional[Callable],
         status_list: List[str]
-    ):
+        , projetos: Optional[List] = None, etapas: Optional[List] = None, on_edit_save: Optional[Callable] = None):
         """Renderiza um card de demanda no kanban"""
         
         prioridade_cores = {
@@ -128,9 +136,12 @@ class KanbanView:
             col1, col2, col3 = st.columns([1, 1, 1])
             
             with col1:
-                if st.button("✏️ Editar", key=f"kanban_edit_{demanda.id}_{index}", width="stretch"):
+                if st.button("✏️ Editar", key=f"kanban_edit_{demanda.id}_{index}"):
+                    # Open inline Kanban edit (set flag)
+                    st.session_state[f"kanban_edit_dem_{demanda.id}"] = True
                     if on_edit:
                         on_edit(demanda)
+                    st.rerun()
             
             with col2:
                 # Dropdown para mudar status
@@ -143,14 +154,45 @@ class KanbanView:
                 )
                 
                 if novo_status != demanda.status:
-                    if st.button("✓ Atualizar", key=f"kanban_confirm_{demanda.id}_{index}", width="stretch"):
+                    if st.button("✓ Atualizar", key=f"kanban_confirm_{demanda.id}_{index}"):
                         if on_status_change:
                             on_status_change(demanda, novo_status)
             
             with col3:
-                if st.button("🗑️ Deletar", key=f"kanban_delete_{demanda.id}_{index}", width="stretch"):
+                if st.button("🗑️ Deletar", key=f"kanban_delete_{demanda.id}_{index}"):
                     if on_delete:
                         on_delete(demanda)
+
+            # If flag set, render inline edit form
+            # IMPORTANTE: o formulário usa st.columns internamente; por isso ele NÃO pode ficar dentro de um `with colX:`
+            # (senão o Streamlit acusa nesting inválido de columns).
+            if st.session_state.get(f"kanban_edit_dem_{demanda.id}", False):
+                try:
+                    from src.components.ui_components2 import create_demanda_form_v2
+
+                    st.markdown("#### Editar Demanda")
+                    projetos_list = projetos or st.session_state.get('projetos', [])
+                    etapas_list = etapas or st.session_state.get('etapas', [])
+                    form_data = create_demanda_form_v2(
+                        projetos_list,
+                        etapas_list,
+                        demanda,
+                        key_prefix=f"kanban_dem_{demanda.id}",
+                    )
+
+                    btn_save_col, btn_cancel_col = st.columns([1, 1])
+                    with btn_save_col:
+                        if st.button("💾 Salvar", key=f"kanban_save_{demanda.id}_{index}"):
+                            if on_edit_save:
+                                on_edit_save(demanda.id, form_data)
+                            st.session_state[f"kanban_edit_dem_{demanda.id}"] = False
+                            st.rerun()
+                    with btn_cancel_col:
+                        if st.button("✖️ Cancelar", key=f"kanban_cancel_{demanda.id}_{index}"):
+                            st.session_state[f"kanban_edit_dem_{demanda.id}"] = False
+                            st.rerun()
+                except Exception as err:
+                    st.error(f"Erro ao exibir o formulário de edição no Kanban: {err}")
 
 class DashboardMetrics:
     """Classe para exibir métricas do dashboard"""

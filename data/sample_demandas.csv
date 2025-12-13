@@ -1,6 +1,0 @@
-id,titulo,descricao,projeto_id,status,prioridade,responsavel,data_vencimento,data_criacao
-
-dem_1,Login SSO,Implementar login único,proj_1,Pendente,Alta,Enrico,2024-05-01,2024-01-10
-dem_2,Cadastro de usuário,Form de cadastro com validação,proj_1,Em Progresso,Média,Ana,2024-06-05,2024-01-20
-dem_3,Push Notifications,Enviar notificações push no app,proj_2,Pendente,Alta,Carlos,2024-07-15,2024-02-20
-dem_4,Relatório financeiro,Vizualizações do financeiro,proj_3,Pendente,Média,Paula,2024-08-01,2024-03-15

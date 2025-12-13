@@ -1,7 +1,0 @@
-id,nome,descricao,ordem,demanda_id,data_criacao
-eta_1,Especificação,Documento de requisitos,1,dem_1,2024-01-11
-eta_2,Desenvolvimento,Desenvolvimento backend e frontend,2,dem_1,2024-02-01
-eta_3,Teste,QA e testes automatizados,3,dem_1,2024-03-01
-eta_4,Implementação inicial,Configuração do ambiente,1,dem_2,2024-02-10
-eta_5,Entrega,Deploy e validação,2,dem_2,2024-06-01
-eta_6,Design Mobile,Design tela de notificações,1,dem_3,2024-03-01

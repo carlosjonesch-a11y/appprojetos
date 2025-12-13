@@ -1,12 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import os
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 from src.modules.postgres_manager import PostgresManager
-from src.components.ui_components import (
-    create_projeto_card, create_demanda_card, create_projeto_form,
-    create_demanda_form, create_etapa_form, show_status_badge, show_priority_badge
-)
+from src.components.ui_components2 import create_demanda_form_v2
 from src.modules.kanban import KanbanView, DashboardMetrics
 from src.modules.gantt import GanttChart
 
@@ -24,8 +22,21 @@ st.set_page_config(
 # INITIALIZATION
 # ============================================================================
 
+def _get_database_url() -> str:
+    env_url = os.getenv("DATABASE_URL")
+    if env_url:
+        return env_url
+    try:
+        secrets_url = st.secrets["DATABASE_URL"]
+        if secrets_url:
+            return secrets_url
+    except Exception:
+        pass
+    return "postgresql+pg8000://postgres:!Enrico18@localhost:5432/jones"
+
+
 # Database URL (Postgres)
-DATABASE_URL = "postgresql+pg8000://postgres:!Enrico18@localhost:5432/jones"
+DATABASE_URL = _get_database_url()
 
 # Initialize PostgresManager
 if "db_manager" not in st.session_state:
@@ -35,7 +46,11 @@ if "db_manager" not in st.session_state:
 if "db_connected" not in st.session_state:
     try:
         health = st.session_state.db_manager.health_check()
-        st.session_state.db_connected = health.get("connected", False)
+        # `health_check` returns a boolean; be defensive if an object returned
+        if isinstance(health, bool):
+            st.session_state.db_connected = health
+        else:
+            st.session_state.db_connected = bool(health.get("connected", False)) if isinstance(health, dict) else bool(health)
     except Exception as e:
         st.session_state.db_connected = False
         st.session_state.db_error = str(e)
@@ -60,18 +75,17 @@ else:
 # HELPER FUNCTIONS
 # ============================================================================
 
-def adicionar_projeto(nome: str, descricao: str, data_inicio: str, data_fim: str) -> bool:
+def adicionar_projeto(nome: str, descricao: str, data_criacao: str, data_conclusao: str) -> bool:
     """Adiciona um novo projeto à lista e ao banco de dados."""
     try:
         novo_projeto = Projeto(
             id=f"proj_{len(st.session_state.projetos) + 1}",
             nome=nome,
             descricao=descricao,
-            data_inicio=data_inicio,
-            data_fim=data_fim,
+            data_criacao=data_criacao,
+            data_conclusao=data_conclusao,
             status="Ativo",
-            responsavel="",
-            orcamento=0.0
+            responsavel=""
         )
         st.session_state.projetos.append(novo_projeto)
         
@@ -84,7 +98,7 @@ def adicionar_projeto(nome: str, descricao: str, data_inicio: str, data_fim: str
         st.error(f"Erro ao adicionar projeto: {e}")
         return False
 
-def editar_projeto(projeto_id: str, nome: str, descricao: str, data_inicio: str, data_fim: str) -> bool:
+def editar_projeto(projeto_id: str, nome: str, descricao: str, data_criacao: str, data_conclusao: str) -> bool:
     """Edita um projeto existente."""
     try:
         for i, proj in enumerate(st.session_state.projetos):
@@ -93,11 +107,10 @@ def editar_projeto(projeto_id: str, nome: str, descricao: str, data_inicio: str,
                     id=projeto_id,
                     nome=nome,
                     descricao=descricao,
-                    data_inicio=data_inicio,
-                    data_fim=data_fim,
+                    data_criacao=data_criacao,
+                    data_conclusao=data_conclusao,
                     status=proj.status,
-                    responsavel=proj.responsavel,
-                    orcamento=proj.orcamento
+                    responsavel=proj.responsavel
                 )
                 if st.session_state.db_connected:
                     st.session_state.db_manager.save_projetos(st.session_state.projetos)
@@ -122,29 +135,70 @@ def deletar_projeto(projeto_id: str) -> bool:
         st.error(f"Erro ao deletar projeto: {e}")
         return False
 
-def adicionar_demanda(projeto_id: str, titulo: str, descricao: str, prioridade: str, data_vencimento: str) -> bool:
-    """Adiciona uma nova demanda."""
+def adicionar_demanda_from_dict(data: dict) -> bool:
+    """Adiciona nova demanda a partir de dict com campos completos."""
     try:
+        new_id = data.get('id') or f"dem_{len(st.session_state.demandas) + 1}"
         nova_demanda = Demanda(
-            id=f"dem_{len(st.session_state.demandas) + 1}",
-            projeto_id=projeto_id,
-            titulo=titulo,
-            descricao=descricao,
-            prioridade=prioridade,
-            status="Pendente",
-            responsavel="",
-            data_vencimento=data_vencimento,
-            data_criacao=datetime.now().strftime("%Y-%m-%d"),
-            horas_estimadas=0
+            id=new_id,
+            titulo=data.get('titulo', ''),
+            descricao=data.get('descricao', ''),
+            projeto_id=data.get('projeto_id'),
+            status=data.get('status', StatusEnum.TODO.value),
+            prioridade=data.get('prioridade', PriorityEnum.MEDIA.value),
+            etapa_id=data.get('etapa_id'),
+            responsavel=data.get('responsavel'),
+            data_inicio_plano=data.get('data_inicio_plano'),
+            data_inicio_real=data.get('data_inicio_real'),
+            data_vencimento_plano=data.get('data_vencimento_plano'),
+            data_vencimento_real=data.get('data_vencimento_real'),
+            data_vencimento=data.get('data_vencimento'),
+            data_criacao=data.get('data_criacao') or datetime.now().strftime('%Y-%m-%d'),
+            data_conclusao=data.get('data_conclusao'),
+            percentual_completo=int(data.get('percentual_completo') or 0),
+            tags=data.get('tags') or [],
+            comentarios=data.get('comentarios') or []
         )
         st.session_state.demandas.append(nova_demanda)
-        
         if st.session_state.db_connected:
             st.session_state.db_manager.save_demandas(st.session_state.demandas)
-        
         return True
     except Exception as e:
         st.error(f"Erro ao adicionar demanda: {e}")
+        return False
+
+
+def editar_demanda_from_dict(demanda_id: str, data: dict) -> bool:
+    """Edita uma demanda usando um dict com campos completos."""
+    try:
+        for i, dem in enumerate(st.session_state.demandas):
+            if dem.id == demanda_id:
+                st.session_state.demandas[i] = Demanda(
+                    id=demanda_id,
+                    titulo=data.get('titulo', dem.titulo),
+                    descricao=data.get('descricao', dem.descricao),
+                    projeto_id=data.get('projeto_id', dem.projeto_id),
+                    status=data.get('status', dem.status),
+                    prioridade=data.get('prioridade', dem.prioridade),
+                    etapa_id=data.get('etapa_id', dem.etapa_id),
+                    responsavel=data.get('responsavel', dem.responsavel),
+                    data_inicio_plano=data.get('data_inicio_plano', dem.data_inicio_plano),
+                    data_inicio_real=data.get('data_inicio_real', dem.data_inicio_real),
+                    data_vencimento_plano=data.get('data_vencimento_plano', dem.data_vencimento_plano),
+                    data_vencimento_real=data.get('data_vencimento_real', dem.data_vencimento_real),
+                    data_vencimento=data.get('data_vencimento', dem.data_vencimento),
+                    data_criacao=data.get('data_criacao', dem.data_criacao),
+                    data_conclusao=data.get('data_conclusao', dem.data_conclusao),
+                    percentual_completo=int(data.get('percentual_completo', dem.percentual_completo or 0)),
+                    tags=data.get('tags', dem.tags),
+                    comentarios=data.get('comentarios', dem.comentarios)
+                )
+                if st.session_state.db_connected:
+                    st.session_state.db_manager.save_demandas(st.session_state.demandas)
+                return True
+        return False
+    except Exception as e:
+        st.error(f"Erro ao editar demanda: {e}")
         return False
 
 def editar_demanda(demanda_id: str, titulo: str, descricao: str, prioridade: str, data_vencimento: str) -> bool:
@@ -176,7 +230,8 @@ def deletar_demanda(demanda_id: str) -> bool:
     """Deleta uma demanda."""
     try:
         st.session_state.demandas = [d for d in st.session_state.demandas if d.id != demanda_id]
-        st.session_state.etapas = [e for e in st.session_state.etapas if e.demanda_id != demanda_id]
+        # Etapas são independentes de demandas no modelo atual; não deletar etapas ao remover uma demanda
+        # Caso quisesse remover etapas órfãs, poderíamos filtrar por etapas que não aparecem em nenhuma demanda
         
         if st.session_state.db_connected:
             st.session_state.db_manager.save_demandas(st.session_state.demandas)
@@ -213,22 +268,27 @@ def mudar_status_demanda(demanda_id: str, novo_status: str) -> bool:
         return False
 
 def adicionar_etapa(demanda_id: str, titulo: str, descricao: str, data_vencimento: str) -> bool:
-    """Adiciona uma nova etapa."""
+    """Adiciona uma nova etapa e, opcionalmente, associa à demanda (via demanda.etapa_id)."""
     try:
         nova_etapa = Etapa(
             id=f"eta_{len(st.session_state.etapas) + 1}",
-            demanda_id=demanda_id,
-            titulo=titulo,
+            nome=titulo,
             descricao=descricao,
-            status="Não Iniciada",
-            responsavel="",
-            data_vencimento=data_vencimento,
+            ordem=0,
             data_criacao=datetime.now().strftime("%Y-%m-%d")
         )
         st.session_state.etapas.append(nova_etapa)
         
+        # associar etapa a demanda se informado
+        if demanda_id:
+            for i, d in enumerate(st.session_state.demandas):
+                if d.id == demanda_id:
+                    st.session_state.demandas[i].etapa_id = nova_etapa.id
+                    break
+        
         if st.session_state.db_connected:
             st.session_state.db_manager.save_etapas(st.session_state.etapas)
+            st.session_state.db_manager.save_demandas(st.session_state.demandas)
         
         return True
     except Exception as e:
@@ -270,6 +330,9 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Armazenamento")
     st.info("Dados armazenados em memória (sessão atual)")
+    st.write('DB connected:', st.session_state.get('db_connected', False))
+    if st.session_state.get('db_error'):
+        st.write('DB error:', st.session_state.get('db_error'))
     
     if st.button("🗑️ Limpar Tudo", key="clear_all"):
         st.session_state.projetos = []
@@ -279,7 +342,7 @@ with st.sidebar:
         st.rerun()
 
 # Main Tabs
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "🎯 Kanban", "📋 Gerenciar", "⚙️ Configurações"])
+tab1, tab2, tab3 = st.tabs(["📈 Dashboard", "🎯 Kanban", "⚙️ Configurações"])
 
 # ============================================================================
 # TAB 1: DASHBOARD
@@ -287,49 +350,18 @@ tab1, tab2, tab3, tab4 = st.tabs(["📈 Dashboard", "🎯 Kanban", "📋 Gerenci
 with tab1:
     st.subheader("📈 Dashboard de Projetos")
     
-    if st.session_state.projetos:
-        # Metrics Row
-        col1, col2, col3, col4 = st.columns(4)
-        
-        demandas_pendentes = len([d for d in st.session_state.demandas if d.status == "Pendente"])
-        demandas_em_progresso = len([d for d in st.session_state.demandas if d.status == "Em Progresso"])
-        demandas_concluidas = len([d for d in st.session_state.demandas if d.status == "Concluído"])
-        
-        with col1:
-            st.metric("Demandas Pendentes", demandas_pendentes)
-        with col2:
-            st.metric("Em Progresso", demandas_em_progresso)
-        with col3:
-            st.metric("Concluídas", demandas_concluidas)
-        with col4:
-            st.metric("Total", len(st.session_state.demandas))
-        
-        st.markdown("---")
-        
-        # Projects Display
-        st.markdown("### 📌 Projetos Ativos")
-        for projeto in st.session_state.projetos:
-            with st.expander(f"📂 {projeto.nome}", expanded=False):
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.write(f"**Data Início:** {projeto.data_inicio}")
-                with col2:
-                    st.write(f"**Data Fim:** {projeto.data_fim}")
-                with col3:
-                    st.write(f"**Status:** {projeto.status}")
-                
-                st.write(f"**Descrição:** {projeto.descricao}")
-                
-                # Demandas deste projeto
-                demandas_proj = [d for d in st.session_state.demandas if d.projeto_id == projeto.id]
-                if demandas_proj:
-                    st.write(f"**Demandas:** {len(demandas_proj)}")
-                    for demanda in demandas_proj:
-                        st.caption(f"• {demanda.titulo} ({demanda.status})")
-                else:
-                    st.info("Nenhuma demanda neste projeto")
-    else:
-        st.info("📌 Nenhum projeto cadastrado. Vá para 'Gerenciar' para criar um novo projeto.")
+    # Render dashboard metrics and graphs
+    from src.modules.kanban import DashboardMetrics
+    DashboardMetrics.render_metrics(st.session_state.projetos, st.session_state.demandas)
+
+    st.markdown("---")
+
+    # Curva S (planejado x realizado)
+    GanttChart.render_curva_s(st.session_state.demandas, st.session_state.projetos, st.session_state.etapas)
+
+    # Gantt (visão completa com drilldown)
+    st.markdown("### 📊 Gantt (Projetos / Etapas / Demandas)")
+    GanttChart.render_gantt_com_drilldown(st.session_state.demandas, st.session_state.projetos, st.session_state.etapas)
 
 # ============================================================================
 # TAB 2: KANBAN
@@ -337,250 +369,65 @@ with tab1:
 with tab2:
     st.subheader("🎯 Visualização Kanban")
     
+    # Define callbacks
+    def _on_status_change(demanda_obj, novo_status):
+        try:
+            mudar_status_demanda(demanda_obj.id, novo_status)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao atualizar status: {e}")
+    
+    def _on_edit(demanda_obj):
+        # mantém o fluxo de edição dentro do Kanban (flag específica)
+        st.session_state[f"kanban_edit_dem_{demanda_obj.id}"] = True
+        st.rerun()
+    
+    def _on_delete(demanda_obj):
+        try:
+            deletar_demanda(demanda_obj.id)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao deletar demanda: {e}")
+    
     if st.session_state.demandas:
-        kanban = KanbanView(st.session_state.demandas)
-        kanban.render()
+        KanbanView.render_kanban(
+            st.session_state.demandas,
+            on_status_change=_on_status_change,
+            on_edit=_on_edit,
+            on_delete=_on_delete,
+            projetos=st.session_state.projetos,
+            etapas=st.session_state.etapas,
+            on_edit_save=editar_demanda_from_dict
+        )
     else:
-        st.info("📌 Nenhuma demanda para visualizar. Crie uma demanda na aba 'Gerenciar'.")
+        st.info("📌 Nenhuma demanda para visualizar.")
 
 # ============================================================================
-# TAB 3: GERENCIAR
+# TAB 3: CONFIGURAÇÕES
 # ============================================================================
 with tab3:
-    st.subheader("📋 Gerenciar Projetos, Demandas e Etapas")
-    
-    subtab1, subtab2, subtab3 = st.tabs(["Projetos", "Demandas", "Etapas"])
-    
-    # ========================================================================
-    # SUBTAB: PROJETOS
-    # ========================================================================
-    with subtab1:
-        st.markdown("### ➕ Novo Projeto")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            nome_proj = st.text_input("Nome do Projeto", key="nome_proj_new")
-        with col2:
-            descricao_proj = st.text_area("Descrição", key="desc_proj_new", height=80)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            data_inicio_proj = st.date_input("Data de Início", key="data_ini_proj_new")
-        with col2:
-            data_fim_proj = st.date_input("Data de Fim", key="data_fim_proj_new")
-        
-        if st.button("✅ Criar Projeto", key="btn_criar_proj"):
-            if nome_proj:
-                if adicionar_projeto(nome_proj, descricao_proj, str(data_inicio_proj), str(data_fim_proj)):
-                    st.success("✅ Projeto criado com sucesso!")
-                    st.rerun()
-            else:
-                st.error("❌ Nome do projeto é obrigatório")
-        
-        st.markdown("---")
-        st.markdown("### 📂 Projetos Existentes")
-        
-        if st.session_state.projetos:
-            for projeto in st.session_state.projetos:
-                with st.expander(f"📂 {projeto.nome}", expanded=False):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**ID:** {projeto.id}")
-                        st.write(f"**Status:** {projeto.status}")
-                        st.write(f"**Início:** {projeto.data_inicio}")
-                    
-                    with col2:
-                        st.write(f"**Descrição:** {projeto.descricao}")
-                        st.write(f"**Fim:** {projeto.data_fim}")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        if st.button("✏️ Editar", key=f"edit_proj_{projeto.id}"):
-                            st.session_state[f"edit_proj_{projeto.id}"] = True
-                    
-                    with col2:
-                        if st.button("🗑️ Deletar", key=f"del_proj_{projeto.id}"):
-                            if deletar_projeto(projeto.id):
-                                st.success("✅ Projeto deletado!")
-                                st.rerun()
-                    
-                    # Edit Form
-                    if st.session_state.get(f"edit_proj_{projeto.id}", False):
-                        st.markdown("#### Editar Projeto")
-                        nome_edit = st.text_input("Nome", value=projeto.nome, key=f"nome_edit_{projeto.id}")
-                        desc_edit = st.text_area("Descrição", value=projeto.descricao, key=f"desc_edit_{projeto.id}")
-                        data_ini_edit = st.date_input("Data Início", value=pd.to_datetime(projeto.data_inicio), key=f"data_ini_edit_{projeto.id}")
-                        data_fim_edit = st.date_input("Data Fim", value=pd.to_datetime(projeto.data_fim), key=f"data_fim_edit_{projeto.id}")
-                        
-                        if st.button("💾 Salvar", key=f"save_proj_{projeto.id}"):
-                            if editar_projeto(projeto.id, nome_edit, desc_edit, str(data_ini_edit), str(data_fim_edit)):
-                                st.success("✅ Projeto atualizado!")
-                                st.session_state[f"edit_proj_{projeto.id}"] = False
-                                st.rerun()
-        else:
-            st.info("Nenhum projeto cadastrado")
-    
-    # ========================================================================
-    # SUBTAB: DEMANDAS
-    # ========================================================================
-    with subtab2:
-        st.markdown("### ➕ Nova Demanda")
-        
-        projetos_options = [p.nome for p in st.session_state.projetos] if st.session_state.projetos else []
-        
-        if projetos_options:
-            projeto_sel = st.selectbox("Selecione um Projeto", projetos_options, key="proj_sel_dem")
-            projeto_id = next((p.id for p in st.session_state.projetos if p.nome == projeto_sel), None)
-            
-            titulo_dem = st.text_input("Título da Demanda", key="titulo_dem_new")
-            descricao_dem = st.text_area("Descrição", key="desc_dem_new", height=80)
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                prioridade_dem = st.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Crítica"], key="prior_dem_new")
-            with col2:
-                data_venc_dem = st.date_input("Data de Vencimento", key="data_venc_dem_new")
-            
-            if st.button("✅ Criar Demanda", key="btn_criar_dem"):
-                if titulo_dem and projeto_id:
-                    if adicionar_demanda(projeto_id, titulo_dem, descricao_dem, prioridade_dem, str(data_venc_dem)):
-                        st.success("✅ Demanda criada com sucesso!")
-                        st.rerun()
-                else:
-                    st.error("❌ Título e Projeto são obrigatórios")
-        else:
-            st.warning("⚠️ Crie um projeto primeiro")
-        
-        st.markdown("---")
-        st.markdown("### 📋 Demandas Existentes")
-        
-        if st.session_state.demandas:
-            for demanda in st.session_state.demandas:
-                projeto_nome = next((p.nome for p in st.session_state.projetos if p.id == demanda.projeto_id), "Desconhecido")
-                
-                with st.expander(f"📋 {demanda.titulo} ({demanda.status})", expanded=False):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**Projeto:** {projeto_nome}")
-                        st.write(f"**Prioridade:** {demanda.prioridade}")
-                        st.write(f"**Status:** {demanda.status}")
-                    
-                    with col2:
-                        st.write(f"**Descrição:** {demanda.descricao}")
-                        st.write(f"**Vencimento:** {demanda.data_vencimento}")
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        novo_status = st.selectbox("Novo Status", ["Pendente", "Em Progresso", "Concluído"], 
-                                                  value=demanda.status, key=f"status_{demanda.id}")
-                        if novo_status != demanda.status:
-                            mudar_status_demanda(demanda.id, novo_status)
-                            st.rerun()
-                    
-                    with col2:
-                        if st.button("✏️ Editar", key=f"edit_dem_{demanda.id}"):
-                            st.session_state[f"edit_dem_{demanda.id}"] = True
-                    
-                    with col3:
-                        if st.button("🗑️ Deletar", key=f"del_dem_{demanda.id}"):
-                            if deletar_demanda(demanda.id):
-                                st.success("✅ Demanda deletada!")
-                                st.rerun()
-                    
-                    # Edit Form
-                    if st.session_state.get(f"edit_dem_{demanda.id}", False):
-                        st.markdown("#### Editar Demanda")
-                        titulo_edit = st.text_input("Título", value=demanda.titulo, key=f"titulo_edit_{demanda.id}")
-                        desc_edit = st.text_area("Descrição", value=demanda.descricao, key=f"desc_edit_{demanda.id}")
-                        prior_edit = st.selectbox("Prioridade", ["Baixa", "Média", "Alta", "Crítica"], 
-                                                 value=demanda.prioridade, key=f"prior_edit_{demanda.id}")
-                        data_venc_edit = st.date_input("Data Vencimento", value=pd.to_datetime(demanda.data_vencimento), key=f"data_venc_edit_{demanda.id}")
-                        
-                        if st.button("💾 Salvar", key=f"save_dem_{demanda.id}"):
-                            if editar_demanda(demanda.id, titulo_edit, desc_edit, prior_edit, str(data_venc_edit)):
-                                st.success("✅ Demanda atualizada!")
-                                st.session_state[f"edit_dem_{demanda.id}"] = False
-                                st.rerun()
-        else:
-            st.info("Nenhuma demanda cadastrada")
-    
-    # ========================================================================
-    # SUBTAB: ETAPAS
-    # ========================================================================
-    with subtab3:
-        st.markdown("### ➕ Nova Etapa")
-        
-        demandas_options = [d.titulo for d in st.session_state.demandas] if st.session_state.demandas else []
-        
-        if demandas_options:
-            demanda_sel = st.selectbox("Selecione uma Demanda", demandas_options, key="dem_sel_eta")
-            demanda_id = next((d.id for d in st.session_state.demandas if d.titulo == demanda_sel), None)
-            
-            titulo_eta = st.text_input("Título da Etapa", key="titulo_eta_new")
-            descricao_eta = st.text_area("Descrição", key="desc_eta_new", height=80)
-            data_venc_eta = st.date_input("Data de Vencimento", key="data_venc_eta_new")
-            
-            if st.button("✅ Criar Etapa", key="btn_criar_eta"):
-                if titulo_eta and demanda_id:
-                    if adicionar_etapa(demanda_id, titulo_eta, descricao_eta, str(data_venc_eta)):
-                        st.success("✅ Etapa criada com sucesso!")
-                        st.rerun()
-                else:
-                    st.error("❌ Título e Demanda são obrigatórios")
-        else:
-            st.warning("⚠️ Crie uma demanda primeiro")
-        
-        st.markdown("---")
-        st.markdown("### 📌 Etapas Existentes")
-        
-        if st.session_state.etapas:
-            for etapa in st.session_state.etapas:
-                demanda_titulo = next((d.titulo for d in st.session_state.demandas if d.id == etapa.demanda_id), "Desconhecida")
-                
-                with st.expander(f"📌 {etapa.titulo} ({etapa.status})", expanded=False):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write(f"**Demanda:** {demanda_titulo}")
-                        st.write(f"**Status:** {etapa.status}")
-                    
-                    with col2:
-                        st.write(f"**Descrição:** {etapa.descricao}")
-                        st.write(f"**Vencimento:** {etapa.data_vencimento}")
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        if st.button("✏️ Editar", key=f"edit_eta_{etapa.id}"):
-                            st.session_state[f"edit_eta_{etapa.id}"] = True
-                    
-                    with col2:
-                        if st.button("🗑️ Deletar", key=f"del_eta_{etapa.id}"):
-                            if deletar_etapa(etapa.id):
-                                st.success("✅ Etapa deletada!")
-                                st.rerun()
-        else:
-            st.info("Nenhuma etapa cadastrada")
-
-# ============================================================================
-# TAB 4: CONFIGURAÇÕES
-# ============================================================================
-with tab4:
     st.subheader("⚙️ Configurações")
     
     st.markdown("### 💾 Armazenamento de Dados")
     
     if st.session_state.db_connected:
         st.success("✅ **Conectado ao PostgreSQL**")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.info(f"**Host:** localhost:5432")
-        with col2:
-            st.info(f"**Database:** jones")
-        with col3:
-            st.info(f"**Driver:** pg8000")
+
+        try:
+            from sqlalchemy.engine.url import make_url
+            url = make_url(st.session_state.db_manager.database_url)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                host = url.host or ""
+                port = url.port or ""
+                st.info(f"**Host:** {host}:{port}".strip(':'))
+            with col2:
+                st.info(f"**Database:** {url.database or ''}")
+            with col3:
+                st.info(f"**Driver:** {url.drivername}")
+        except Exception:
+            # fallback simples, sem expor credenciais
+            st.info("DB conectado (detalhes indisponíveis)")
         
         st.markdown("---")
         

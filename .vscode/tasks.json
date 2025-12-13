@@ -1,0 +1,85 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Run Streamlit (default)",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NoProfile",
+                "-File",
+                "${workspaceFolder}\\scripts\\run_streamlit.ps1"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": [],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            }
+        },
+        {
+            "label": "Run Streamlit (start 8591)",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NoProfile",
+                "-File",
+                "${workspaceFolder}\\scripts\\run_streamlit.ps1",
+                "-StartPort",
+                "8591"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Streamlit (start 8591, kill conflicts)",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NoProfile",
+                "-File",
+                "${workspaceFolder}\\scripts\\run_streamlit.ps1",
+                "-StartPort",
+                "8591",
+                "-KillConflicts"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        },
+
+        {
+            "label": "Stop Streamlit on 8501",
+            "type": "shell",
+            "command": "pwsh",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-NoProfile",
+                "-File",
+                "${workspaceFolder}\\scripts\\stop_streamlit_on_port.ps1",
+                "-Port",
+                "8501"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated"
+            },
+            "problemMatcher": []
+        }
+    ]
+}

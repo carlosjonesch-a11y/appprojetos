@@ -1,0 +1,23 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Streamlit (task)",
+            "type": "python",
+            "request": "launch",
+            "module": "streamlit",
+            "console": "integratedTerminal",
+            "args": [
+                "run",
+                "app.py",
+                "--server.port",
+                "8501",
+                "--server.address",
+                "localhost"
+            ],
+            "env": {},
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true
+        }
+    ]
+}
