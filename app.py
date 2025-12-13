@@ -59,38 +59,138 @@ def _parse_date_yyyy_mm_dd(value: str):
         return None
 
 
+def _planned_progress_for_demanda(d, today):
+    start = _parse_date_yyyy_mm_dd(getattr(d, "data_inicio_plano", None))
+    end = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento_plano", None))
+    if not end:
+        end = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento", None))
+
+    if not start and not end:
+        return None
+    if not start and end:
+        return 1.0 if today >= end else 0.0
+    if start and not end:
+        return 1.0 if today > start else 0.0
+
+    if today <= start:
+        return 0.0
+    if today >= end:
+        return 1.0
+    total = (end - start).days
+    if total <= 0:
+        return 1.0
+    return max(0.0, min(1.0, (today - start).days / float(total)))
+
+
+def _actual_progress_for_demanda(d):
+    try:
+        pct = float(getattr(d, "percentual_completo", 0) or 0)
+    except Exception:
+        pct = 0.0
+    return max(0.0, min(1.0, pct / 100.0))
+
+
 def _compute_project_delay_risk(projetos, demandas):
+    """Heurística baseada em Curva S: planejado vs realizado + prazos (projeto e demandas)."""
     today = datetime.now().date()
     rows = []
 
     for p in projetos:
-        p_due = _parse_date_yyyy_mm_dd(getattr(p, "data_conclusao", None))
         ds = [d for d in demandas if getattr(d, "projeto_id", None) == p.id]
+        if not ds:
+            continue
 
-        open_ds = [d for d in ds if (getattr(d, "status", None) != StatusEnum.DONE.value)]
-        overdue = 0
-        for d in open_ds:
-            due = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento_plano", None))
-            if not due:
-                due = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento", None))
-            if due and due < today:
-                overdue += 1
+        # Prazo do projeto: preferir data_conclusao do projeto; senão usar maior vencimento planejado das demandas
+        p_due = _parse_date_yyyy_mm_dd(getattr(p, "data_conclusao", None))
+        if not p_due:
+            due_candidates = [_parse_date_yyyy_mm_dd(getattr(d, "data_vencimento_plano", None)) for d in ds]
+            due_candidates = [x for x in due_candidates if x]
+            p_due = max(due_candidates) if due_candidates else None
 
-        risk = overdue > 0 or (p_due is not None and p_due < today and len(open_ds) > 0)
+        planned_list = []
+        actual_list = []
+        overdue_open = 0
+        open_count = 0
+
+        for d in ds:
+            planned = _planned_progress_for_demanda(d, today)
+            actual = _actual_progress_for_demanda(d)
+
+            if planned is not None:
+                planned_list.append(planned)
+            actual_list.append(actual)
+
+            is_open = getattr(d, "status", None) != StatusEnum.DONE.value and actual < 1.0
+            if is_open:
+                open_count += 1
+                due = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento_plano", None))
+                if not due:
+                    due = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento", None))
+                if due and due < today:
+                    overdue_open += 1
+
+        planned_pct = sum(planned_list) / len(planned_list) if planned_list else None
+        actual_pct = sum(actual_list) / len(actual_list) if actual_list else 0.0
+        slip = (planned_pct - actual_pct) if planned_pct is not None else 0.0
+
+        # Projeção de término por velocidade (baseado em % realizado)
+        start_candidates = [_parse_date_yyyy_mm_dd(getattr(d, "data_inicio_plano", None)) for d in ds]
+        start_candidates = [x for x in start_candidates if x]
+        p_start = min(start_candidates) if start_candidates else None
+
+        projected_finish = None
+        delay_days = None
+
+        if p_start:
+            elapsed_days = max(1, (today - p_start).days)
+            velocity_per_day = actual_pct / float(elapsed_days)
+            remaining = max(0.0, 1.0 - actual_pct)
+            if velocity_per_day > 0.0:
+                projected_finish = today + timedelta(days=int(round(remaining / velocity_per_day)))
+                if p_due:
+                    delay_days = max(0, (projected_finish - p_due).days)
+
+        overdue_ratio = overdue_open / float(len(ds)) if ds else 0.0
+        deadline_pressure = 0.0
+        if p_due:
+            days_to_due = (p_due - today).days
+            if days_to_due <= 7:
+                deadline_pressure = 0.15
+            elif days_to_due <= 14:
+                deadline_pressure = 0.08
+
+        score = max(0.0, slip) * 0.7 + overdue_ratio * 0.3 + deadline_pressure
+
+        if score >= 0.35 or (delay_days is not None and delay_days >= 1):
+            risk_level = "Alto"
+        elif score >= 0.18:
+            risk_level = "Médio"
+        else:
+            risk_level = "Baixo"
+
+        tendencia = "Atraso provável" if (delay_days is not None and delay_days >= 1) or risk_level == "Alto" else "No prazo"
 
         rows.append(
             {
                 "projeto": getattr(p, "nome", p.id),
                 "prazo_projeto": p_due.isoformat() if p_due else "",
-                "demandas_abertas": len(open_ds),
-                "demandas_vencidas": overdue,
-                "risco_atraso": "Sim" if risk else "Não",
+                "pct_planejado_hoje": f"{int(round(planned_pct * 100))}%" if planned_pct is not None else "",
+                "pct_real_hoje": f"{int(round(actual_pct * 100))}%",
+                "gap_planejado_vs_real": f"{int(round(max(0.0, slip) * 100))}%" if planned_pct is not None else "",
+                "demandas_abertas": open_count,
+                "demandas_vencidas": overdue_open,
+                "data_prevista_fim": projected_finish.isoformat() if projected_finish else "",
+                "dias_previstos_atraso": int(delay_days) if delay_days is not None else "",
+                "risco": risk_level,
+                "tendência": tendencia,
+                "_risk_score": float(score),
             }
         )
 
     df = pd.DataFrame(rows)
     if not df.empty:
-        df = df.sort_values(["risco_atraso", "demandas_vencidas", "demandas_abertas"], ascending=[False, False, False])
+        df = df.sort_values(["tendência", "_risk_score", "dias_previstos_atraso", "demandas_vencidas"], ascending=[True, False, False, False])
+        df = df.drop(columns=["_risk_score"], errors="ignore")
     return df
 
 
@@ -403,7 +503,10 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### Armazenamento")
-    st.info("Dados armazenados em memória (sessão atual)")
+    if st.session_state.get('db_connected', False):
+        st.info("Dados persistidos no Postgres (Neon)")
+    else:
+        st.info("Dados armazenados em memória (sessão atual)")
     st.write('DB connected:', st.session_state.get('db_connected', False))
     if st.session_state.get('db_error'):
         st.write('DB error:', st.session_state.get('db_error'))
@@ -428,17 +531,17 @@ with tab1:
     from src.modules.kanban import DashboardMetrics
     DashboardMetrics.render_metrics(st.session_state.projetos, st.session_state.demandas)
 
-    # Previsão simples (heurística) de atraso
+    # Previsão de atraso (Curva S: planejado vs realizado)
     st.markdown("---")
-    st.markdown("### ⏱️ Previsão de Atraso (heurística)")
+    st.markdown("### ⏱️ Previsão de Atraso (Curva S)")
     if st.session_state.projetos:
         df_risk = _compute_project_delay_risk(st.session_state.projetos, st.session_state.demandas)
         if df_risk.empty:
             st.info("Sem dados suficientes para calcular risco.")
         else:
             total = len(df_risk)
-            at_risk = int((df_risk["risco_atraso"] == "Sim").sum())
-            st.metric("Projetos com risco de atraso", f"{at_risk}/{total}")
+            likely_delay = int((df_risk["tendência"] == "Atraso provável").sum())
+            st.metric("Projetos com atraso provável", f"{likely_delay}/{total}")
             st.dataframe(df_risk, use_container_width=True, hide_index=True)
     else:
         st.info("Cadastre projetos e demandas para ver a previsão.")
@@ -619,22 +722,24 @@ with tab4:
         # Etapas
         etapas = [
             Etapa(id=f"eta_{uuid4().hex}", nome="Planejamento", descricao="", ordem=1, data_criacao=today.isoformat()),
-            Etapa(id=f"eta_{uuid4().hex}", nome="Execução", descricao="", ordem=2, data_criacao=today.isoformat()),
-            Etapa(id=f"eta_{uuid4().hex}", nome="Validação", descricao="", ordem=3, data_criacao=today.isoformat()),
-            Etapa(id=f"eta_{uuid4().hex}", nome="Entrega", descricao="", ordem=4, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Design", descricao="", ordem=2, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Desenvolvimento", descricao="", ordem=3, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Testes", descricao="", ordem=4, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Entrega", descricao="", ordem=5, data_criacao=today.isoformat()),
         ]
 
         # Projetos
         projetos = []
-        for i in range(1, 4):
-            prazo = (today + timedelta(days=14 * i)).isoformat()
+        for i in range(1, 21):
+            start = today - timedelta(days=rnd.randint(10, 90))
+            prazo = (today + timedelta(days=rnd.randint(15, 120))).isoformat()
             projetos.append(
                 Projeto(
                     id=f"proj_{uuid4().hex}",
-                    nome=f"Projeto Demo {i}",
-                    descricao=f"Projeto fictício para teste ({i}).",
+                    nome=f"Projeto Demo {i:02d}",
+                    descricao=f"Projeto fictício para teste (seed).",
                     status="Ativo",
-                    data_criacao=today.isoformat(),
+                    data_criacao=start.isoformat(),
                     data_conclusao=prazo,
                     responsavel="",
                 )
@@ -645,31 +750,79 @@ with tab4:
         status_choices = [StatusEnum.TODO.value, StatusEnum.IN_PROGRESS.value, StatusEnum.REVIEW.value, StatusEnum.DONE.value]
         prioridade_choices = [PriorityEnum.BAIXA.value, PriorityEnum.MEDIA.value, PriorityEnum.ALTA.value, PriorityEnum.URGENTE.value]
 
-        for p in projetos:
-            for j in range(1, 5):
-                dem_status = rnd.choice(status_choices)
+        for p_idx, p in enumerate(projetos):
+            p_start = _parse_date_yyyy_mm_dd(getattr(p, "data_criacao", None)) or today
+            p_due = _parse_date_yyyy_mm_dd(getattr(p, "data_conclusao", None)) or (today + timedelta(days=60))
+            horizon_days = max(14, (p_due - p_start).days)
+
+            # 5 demandas por projeto => 100 demandas (20 projetos)
+            for j in range(1, 6):
                 etapa = rnd.choice(etapas)
-                # cria algumas vencidas para testar a previsão
-                venc_plano = today - timedelta(days=rnd.randint(1, 5)) if (j == 1 and p == projetos[0]) else today + timedelta(days=rnd.randint(2, 20))
+                prioridade = rnd.choice(prioridade_choices)
+
+                # Datas planejadas dentro do horizonte do projeto
+                start_offset = rnd.randint(0, max(0, horizon_days - 10))
+                dur = rnd.randint(5, 25)
+                start_plan = p_start + timedelta(days=start_offset)
+                end_plan = start_plan + timedelta(days=dur)
+
+                # Algumas demandas propositalmente vencidas (para aparecer risco no dashboard)
+                if p_idx < 4 and j <= 2:
+                    end_plan = today - timedelta(days=rnd.randint(1, 10))
+                    start_plan = end_plan - timedelta(days=dur)
+
+                # Progresso planejado vs realizado (Curva S simplificada)
+                if today <= start_plan:
+                    planned = 0.0
+                elif today >= end_plan:
+                    planned = 1.0
+                else:
+                    total = max(1, (end_plan - start_plan).days)
+                    planned = max(0.0, min(1.0, (today - start_plan).days / float(total)))
+
+                # Projetos iniciais ficam mais "atrasados" para evidenciar a previsão
+                lag = 0.25 if p_idx < 4 else 0.05
+                noise = rnd.uniform(-0.10, 0.10)
+                actual = max(0.0, min(1.0, planned - lag + noise))
+
+                # Distribuição de status coerente com %
+                if actual >= 0.99:
+                    dem_status = StatusEnum.DONE.value
+                    actual = 1.0
+                elif actual >= 0.70:
+                    dem_status = StatusEnum.REVIEW.value
+                elif actual >= 0.25:
+                    dem_status = StatusEnum.IN_PROGRESS.value
+                else:
+                    dem_status = StatusEnum.TODO.value
+
+                # Garante alguma variedade
+                if rnd.random() < 0.08:
+                    dem_status = rnd.choice(status_choices)
+
+                concluida = dem_status == StatusEnum.DONE.value
+                venc_real = end_plan if concluida else None
+                data_conclusao = venc_real.isoformat() if venc_real else None
+
                 demandas.append(
                     Demanda(
                         id=f"dem_{uuid4().hex}",
                         titulo=f"Demanda {j} - {p.nome}",
-                        descricao="Tarefa fictícia para teste.",
+                        descricao="Tarefa fictícia para teste (seed).",
                         projeto_id=p.id,
                         status=dem_status,
-                        prioridade=rnd.choice(prioridade_choices),
+                        prioridade=prioridade,
                         etapa_id=etapa.id,
                         responsavel="",
-                        data_inicio_plano=(today - timedelta(days=rnd.randint(0, 3))).isoformat(),
+                        data_inicio_plano=start_plan.isoformat(),
                         data_inicio_real=None,
-                        data_vencimento_plano=venc_plano.isoformat(),
-                        data_vencimento_real=None,
-                        data_vencimento=venc_plano.isoformat(),
-                        data_criacao=today.isoformat(),
-                        data_conclusao=today.isoformat() if dem_status == StatusEnum.DONE.value else None,
-                        percentual_completo=100 if dem_status == StatusEnum.DONE.value else rnd.randint(0, 80),
-                        tags=["demo"],
+                        data_vencimento_plano=end_plan.isoformat(),
+                        data_vencimento_real=venc_real.isoformat() if venc_real else None,
+                        data_vencimento=end_plan.isoformat(),
+                        data_criacao=p_start.isoformat(),
+                        data_conclusao=data_conclusao,
+                        percentual_completo=int(round(actual * 100)) if not concluida else 100,
+                        tags=["seed"],
                         comentarios=[],
                     )
                 )
@@ -681,7 +834,7 @@ with tab4:
         pm.save_etapas(etapas)
         pm.save_projetos(projetos)
         pm.save_demandas(demandas)
-        st.success("Dados fictícios inseridos no banco.")
+        st.success("Dados fictícios inseridos no banco (20 projetos, 100 demandas, 5 etapas).")
         st.session_state.reload_data = True
 
     def _clear_demo_data():
