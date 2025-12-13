@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 from uuid import uuid4
+import random
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 from src.modules.postgres_manager import PostgresManager
 from src.components.ui_components2 import create_demanda_form_v2, create_projeto_form, create_etapa_form
@@ -46,6 +47,51 @@ def _get_secret_value(key: str) -> str:
         return str(secret_val) if secret_val is not None else ""
     except Exception:
         return ""
+
+
+def _parse_date_yyyy_mm_dd(value: str):
+    if not value:
+        return None
+    try:
+        # aceita "YYYY-MM-DD" ou ISO com hora
+        return datetime.fromisoformat(str(value)[:10]).date()
+    except Exception:
+        return None
+
+
+def _compute_project_delay_risk(projetos, demandas):
+    today = datetime.now().date()
+    rows = []
+
+    for p in projetos:
+        p_due = _parse_date_yyyy_mm_dd(getattr(p, "data_conclusao", None))
+        ds = [d for d in demandas if getattr(d, "projeto_id", None) == p.id]
+
+        open_ds = [d for d in ds if (getattr(d, "status", None) != StatusEnum.DONE.value)]
+        overdue = 0
+        for d in open_ds:
+            due = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento_plano", None))
+            if not due:
+                due = _parse_date_yyyy_mm_dd(getattr(d, "data_vencimento", None))
+            if due and due < today:
+                overdue += 1
+
+        risk = overdue > 0 or (p_due is not None and p_due < today and len(open_ds) > 0)
+
+        rows.append(
+            {
+                "projeto": getattr(p, "nome", p.id),
+                "prazo_projeto": p_due.isoformat() if p_due else "",
+                "demandas_abertas": len(open_ds),
+                "demandas_vencidas": overdue,
+                "risco_atraso": "Sim" if risk else "Não",
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values(["risco_atraso", "demandas_vencidas", "demandas_abertas"], ascending=[False, False, False])
+    return df
 
 
 # Database URL (Postgres)
@@ -382,6 +428,21 @@ with tab1:
     from src.modules.kanban import DashboardMetrics
     DashboardMetrics.render_metrics(st.session_state.projetos, st.session_state.demandas)
 
+    # Previsão simples (heurística) de atraso
+    st.markdown("---")
+    st.markdown("### ⏱️ Previsão de Atraso (heurística)")
+    if st.session_state.projetos:
+        df_risk = _compute_project_delay_risk(st.session_state.projetos, st.session_state.demandas)
+        if df_risk.empty:
+            st.info("Sem dados suficientes para calcular risco.")
+        else:
+            total = len(df_risk)
+            at_risk = int((df_risk["risco_atraso"] == "Sim").sum())
+            st.metric("Projetos com risco de atraso", f"{at_risk}/{total}")
+            st.dataframe(df_risk, use_container_width=True, hide_index=True)
+    else:
+        st.info("Cadastre projetos e demandas para ver a previsão.")
+
     st.markdown("---")
 
     # Curva S (planejado x realizado)
@@ -541,6 +602,102 @@ with tab4:
             st.session_state.admin_ok = False
             st.session_state.pop("admin_pwd", None)
             st.rerun()
+
+    st.markdown("---")
+
+    # -------------------- DADOS FICTÍCIOS (DEMO) --------------------
+    st.markdown("### 🧪 Dados fictícios (para teste)")
+
+    def _seed_demo_data():
+        pm = st.session_state.db_manager
+        # limpar somente as tabelas core antes de popular
+        pm.clear_core_data()
+
+        rnd = random.Random(42)
+        today = datetime.now().date()
+
+        # Etapas
+        etapas = [
+            Etapa(id=f"eta_{uuid4().hex}", nome="Planejamento", descricao="", ordem=1, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Execução", descricao="", ordem=2, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Validação", descricao="", ordem=3, data_criacao=today.isoformat()),
+            Etapa(id=f"eta_{uuid4().hex}", nome="Entrega", descricao="", ordem=4, data_criacao=today.isoformat()),
+        ]
+
+        # Projetos
+        projetos = []
+        for i in range(1, 4):
+            prazo = (today + timedelta(days=14 * i)).isoformat()
+            projetos.append(
+                Projeto(
+                    id=f"proj_{uuid4().hex}",
+                    nome=f"Projeto Demo {i}",
+                    descricao=f"Projeto fictício para teste ({i}).",
+                    status="Ativo",
+                    data_criacao=today.isoformat(),
+                    data_conclusao=prazo,
+                    responsavel="",
+                )
+            )
+
+        # Demandas
+        demandas = []
+        status_choices = [StatusEnum.TODO.value, StatusEnum.IN_PROGRESS.value, StatusEnum.REVIEW.value, StatusEnum.DONE.value]
+        prioridade_choices = [PriorityEnum.BAIXA.value, PriorityEnum.MEDIA.value, PriorityEnum.ALTA.value, PriorityEnum.URGENTE.value]
+
+        for p in projetos:
+            for j in range(1, 5):
+                dem_status = rnd.choice(status_choices)
+                etapa = rnd.choice(etapas)
+                # cria algumas vencidas para testar a previsão
+                venc_plano = today - timedelta(days=rnd.randint(1, 5)) if (j == 1 and p == projetos[0]) else today + timedelta(days=rnd.randint(2, 20))
+                demandas.append(
+                    Demanda(
+                        id=f"dem_{uuid4().hex}",
+                        titulo=f"Demanda {j} - {p.nome}",
+                        descricao="Tarefa fictícia para teste.",
+                        projeto_id=p.id,
+                        status=dem_status,
+                        prioridade=rnd.choice(prioridade_choices),
+                        etapa_id=etapa.id,
+                        responsavel="",
+                        data_inicio_plano=(today - timedelta(days=rnd.randint(0, 3))).isoformat(),
+                        data_inicio_real=None,
+                        data_vencimento_plano=venc_plano.isoformat(),
+                        data_vencimento_real=None,
+                        data_vencimento=venc_plano.isoformat(),
+                        data_criacao=today.isoformat(),
+                        data_conclusao=today.isoformat() if dem_status == StatusEnum.DONE.value else None,
+                        percentual_completo=100 if dem_status == StatusEnum.DONE.value else rnd.randint(0, 80),
+                        tags=["demo"],
+                        comentarios=[],
+                    )
+                )
+
+        st.session_state.etapas = etapas
+        st.session_state.projetos = projetos
+        st.session_state.demandas = demandas
+
+        pm.save_etapas(etapas)
+        pm.save_projetos(projetos)
+        pm.save_demandas(demandas)
+        st.success("Dados fictícios inseridos no banco.")
+        st.session_state.reload_data = True
+
+    def _clear_demo_data():
+        pm = st.session_state.db_manager
+        pm.clear_core_data()
+        st.session_state.projetos = []
+        st.session_state.demandas = []
+        st.session_state.etapas = []
+        st.success("Tabelas de projetos/demandas/etapas limpas.")
+        st.session_state.reload_data = True
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.button("Popular banco com dados fictícios", key="seed_demo", on_click=_seed_demo_data)
+    with c2:
+        st.button("Deletar dados (projetos/demandas/etapas)", key="clear_demo", on_click=_clear_demo_data)
 
     st.markdown("---")
 

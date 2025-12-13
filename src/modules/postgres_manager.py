@@ -374,6 +374,25 @@ class PostgresManager:
         finally:
             session.close()
 
+    def clear_core_data(self) -> bool:
+        """Remove todos os registros das tabelas projetos, demandas e etapas (não afeta checklist)."""
+        if not self.connected:
+            raise RuntimeError('PostgresManager not connected: ' + str(self.last_error))
+        session = self.Session()
+        try:
+            # Ordem mais segura: dependências primeiro
+            session.execute(sa_delete(DemandaModel))
+            session.execute(sa_delete(EtapaModel))
+            session.execute(sa_delete(ProjetoModel))
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print('PostgresManager clear_core_data error', e)
+            return False
+        finally:
+            session.close()
+
     # ------------------------- Checklist helpers -------------------------
     def load_checklist_topics(self) -> list[dict]:
         if not self.connected:
