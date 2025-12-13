@@ -7,6 +7,20 @@ class ChecklistView:
     def _init_state():
         if "checklist_items" not in st.session_state:
             st.session_state.checklist_items = []
+        if "checklist_new_topic" not in st.session_state:
+            st.session_state.checklist_new_topic = ""
+        if "checklist_error" not in st.session_state:
+            st.session_state.checklist_error = ""
+
+    @staticmethod
+    def _add_item():
+        text = (st.session_state.get("checklist_new_topic") or "").strip()
+        if not text:
+            st.session_state.checklist_error = "Digite o nome do tópico."
+            return
+        st.session_state.checklist_items.append({"id": uuid4().hex, "text": text, "done": False})
+        st.session_state.checklist_new_topic = ""
+        st.session_state.checklist_error = ""
 
     @staticmethod
     def render():
@@ -15,20 +29,14 @@ class ChecklistView:
 
         st.subheader("✅ Check-list")
 
+        if st.session_state.get("checklist_error"):
+            st.warning(st.session_state.checklist_error)
+
         col1, col2 = st.columns([4, 1])
         with col1:
-            topic = st.text_input("Nome do tópico", key="checklist_new_topic")
+            st.text_input("Nome do tópico", key="checklist_new_topic")
         with col2:
-            if st.button("Adicionar", key="checklist_add"):
-                text = (topic or "").strip()
-                if not text:
-                    st.warning("Digite o nome do tópico.")
-                else:
-                    st.session_state.checklist_items.append(
-                        {"id": uuid4().hex, "text": text, "done": False}
-                    )
-                    st.session_state.checklist_new_topic = ""
-                    st.rerun()
+            st.button("Adicionar", key="checklist_add", on_click=ChecklistView._add_item)
 
         st.markdown("---")
 
