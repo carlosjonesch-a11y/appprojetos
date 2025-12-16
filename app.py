@@ -666,8 +666,6 @@ with tab3:
         else:
             st.error("❌ **Falha ao conectar no Google Planilhas**")
 
-        st.info(f"**Spreadsheet ID:** {gs_cfg_view.get('spreadsheet_id', '')}")
-
         if gs_missing:
             st.warning("Faltam secrets do Google: " + ", ".join(gs_missing))
             st.caption("Você pode usar GSHEETS_SPREADSHEET_ID (ou GSHEETS_URL) e GOOGLE_SERVICE_ACCOUNT_JSON.")
