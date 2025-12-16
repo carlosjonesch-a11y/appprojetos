@@ -18,7 +18,7 @@ class ChecklistView:
     @staticmethod
     def _require_db():
         if not st.session_state.get("db_connected", False):
-            st.warning("Para usar o check-list com persistência, configure DATABASE_URL (Postgres/Neon) no Streamlit Cloud.")
+            st.warning("Para usar o check-list com persistência, configure SharePoint (SP_*) ou DATABASE_URL no Streamlit Cloud.")
             st.stop()
         if "db_manager" not in st.session_state:
             st.warning("DB manager não inicializado.")
@@ -102,7 +102,13 @@ class ChecklistView:
 
         st.subheader("✅ Check-list")
 
-        st.caption("Tópicos e tarefas são salvos no PostgreSQL (Neon).")
+        backend = st.session_state.get("storage_backend", "")
+        if backend == "sharepoint":
+            st.caption("Tópicos e tarefas são salvos no SharePoint (Excel).")
+        elif backend == "postgres":
+            st.caption("Tópicos e tarefas são salvos no PostgreSQL (Neon).")
+        else:
+            st.caption("Tópicos e tarefas são salvos no armazenamento configurado.")
 
         if st.session_state.get("checklist_error"):
             st.warning(st.session_state.checklist_error)

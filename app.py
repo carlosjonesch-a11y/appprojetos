@@ -6,6 +6,7 @@ from uuid import uuid4
 import random
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
 from src.modules.postgres_manager import PostgresManager
+from src.modules.sharepoint_excel_manager import SharePointExcelManager
 from src.components.ui_components2 import create_demanda_form_v2, create_projeto_form, create_etapa_form
 from src.modules.kanban import KanbanView, DashboardMetrics
 from src.modules.gantt import GanttChart
@@ -36,6 +37,21 @@ def _get_database_url() -> str:
     except Exception:
         pass
     return ""
+
+
+def _get_sharepoint_config() -> dict:
+    return {
+        "tenant_id": _get_secret_value("SP_TENANT_ID"),
+        "client_id": _get_secret_value("SP_CLIENT_ID"),
+        "client_secret": _get_secret_value("SP_CLIENT_SECRET"),
+        "site_host": _get_secret_value("SP_SITE_HOST"),
+        "site_path": _get_secret_value("SP_SITE_PATH"),
+        "file_path": _get_secret_value("SP_FILE_PATH"),
+    }
+
+
+def _sharepoint_is_configured(cfg: dict) -> bool:
+    return all((cfg.get("tenant_id"), cfg.get("client_id"), cfg.get("client_secret"), cfg.get("site_host"), cfg.get("site_path"), cfg.get("file_path")))
 
 
 def _get_secret_value(key: str) -> str:
@@ -197,34 +213,53 @@ def _compute_project_delay_risk(projetos, demandas):
     return df
 
 
-# Database URL (Postgres)
+# Storage backend: SharePoint (Excel) ou Postgres
+sp_cfg = _get_sharepoint_config()
+use_sharepoint = _sharepoint_is_configured(sp_cfg)
+
 DATABASE_URL = _get_database_url()
 
-# Initialize PostgresManager (apenas se houver DATABASE_URL)
-if not DATABASE_URL:
-    st.session_state.db_connected = False
-    st.session_state.db_error = "DATABASE_URL não configurado. Defina em variáveis de ambiente ou em Secrets do Streamlit Cloud."
-else:
-    if "db_manager" not in st.session_state:
-        st.session_state.db_manager = PostgresManager(DATABASE_URL)
-    else:
-        # Se o app foi atualizado, a instância pode ter ficado com uma classe antiga em memória.
-        # Recriar evita AttributeError para novos recursos (ex.: checklist persistido).
-        if not hasattr(st.session_state.db_manager, "load_checklist_topics"):
-            st.session_state.db_manager = PostgresManager(DATABASE_URL)
+if use_sharepoint:
+    st.session_state.storage_backend = "sharepoint"
+    if "db_manager" not in st.session_state or not isinstance(st.session_state.db_manager, SharePointExcelManager):
+        st.session_state.db_manager = SharePointExcelManager(
+            tenant_id=sp_cfg["tenant_id"],
+            client_id=sp_cfg["client_id"],
+            client_secret=sp_cfg["client_secret"],
+            site_host=sp_cfg["site_host"],
+            site_path=sp_cfg["site_path"],
+            file_path=sp_cfg["file_path"],
+        )
 
-    # Test connection on startup
     if "db_connected" not in st.session_state:
         try:
-            health = st.session_state.db_manager.health_check()
-            # `health_check` returns a boolean; be defensive if an object returned
-            if isinstance(health, bool):
-                st.session_state.db_connected = health
-            else:
-                st.session_state.db_connected = bool(health.get("connected", False)) if isinstance(health, dict) else bool(health)
+            st.session_state.db_connected = bool(st.session_state.db_manager.health_check())
         except Exception as e:
             st.session_state.db_connected = False
             st.session_state.db_error = str(e)
+
+elif DATABASE_URL:
+    st.session_state.storage_backend = "postgres"
+    if "db_manager" not in st.session_state or not isinstance(st.session_state.db_manager, PostgresManager):
+        st.session_state.db_manager = PostgresManager(DATABASE_URL)
+    else:
+        # Se o app foi atualizado, a instância pode ter ficado com uma classe antiga em memória.
+        if not hasattr(st.session_state.db_manager, "load_checklist_topics"):
+            st.session_state.db_manager = PostgresManager(DATABASE_URL)
+
+    if "db_connected" not in st.session_state:
+        try:
+            st.session_state.db_connected = bool(st.session_state.db_manager.health_check())
+        except Exception as e:
+            st.session_state.db_connected = False
+            st.session_state.db_error = str(e)
+
+else:
+    st.session_state.storage_backend = "none"
+    st.session_state.db_connected = False
+    st.session_state.db_error = (
+        "Persistência não configurada. Configure SharePoint (SP_*) ou DATABASE_URL em Secrets do Streamlit Cloud."
+    )
 
 # Load data from Postgres
 if st.session_state.db_connected:
