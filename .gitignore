@@ -1,5 +1,8 @@
 # Ignorar credenciais e arquivos locais
 credentials.json
+*.json
+!package.json
+!package-lock.json
 venv/
 __pycache__/
 *.pyc
