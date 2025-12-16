@@ -18,7 +18,7 @@ class ChecklistView:
     @staticmethod
     def _require_db():
         if not st.session_state.get("db_connected", False):
-            st.warning("Para usar o check-list com persistência, configure SharePoint (SP_*) ou DATABASE_URL no Streamlit Cloud.")
+            st.warning("Para usar o check-list com persistência, configure Google Planilhas (GSHEETS_SPREADSHEET_ID + GOOGLE_SERVICE_ACCOUNT_JSON) no Streamlit Cloud.")
             st.stop()
         if "db_manager" not in st.session_state:
             st.warning("DB manager não inicializado.")
@@ -32,9 +32,8 @@ class ChecklistView:
         if not name:
             st.session_state.checklist_error = "Digite o nome do tópico."
             return
-        topic_id = f"ct_{uuid4().hex}"
-        ok = pm.create_checklist_topic(topic_id, name, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        if not ok:
+        result = pm.create_checklist_topic(name)
+        if not result:
             st.session_state.checklist_error = "Não foi possível criar o tópico."
             return
         st.session_state.checklist_new_topic_name = ""
@@ -74,9 +73,8 @@ class ChecklistView:
         if not text:
             st.session_state.checklist_error = "Digite a tarefa do tópico."
             return
-        task_id = f"ctk_{uuid4().hex}"
-        ok = pm.create_checklist_task(task_id, topic_id, text, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        if not ok:
+        result = pm.create_checklist_task(topic_id, text)
+        if not result:
             st.session_state.checklist_error = "Não foi possível criar a tarefa."
             return
         st.session_state[input_key] = ""
@@ -95,7 +93,7 @@ class ChecklistView:
 
     @staticmethod
     def render():
-        """Checklist por Tópico -> Tarefas, persistido no Postgres (Neon)."""
+        """Checklist por Tópico -> Tarefas, persistido no Google Planilhas."""
         ChecklistView._init_state()
 
         pm = ChecklistView._require_db()
@@ -103,10 +101,8 @@ class ChecklistView:
         st.subheader("✅ Check-list")
 
         backend = st.session_state.get("storage_backend", "")
-        if backend == "sharepoint":
-            st.caption("Tópicos e tarefas são salvos no SharePoint (Excel).")
-        elif backend == "postgres":
-            st.caption("Tópicos e tarefas são salvos no PostgreSQL (Neon).")
+        if backend == "gsheets":
+            st.caption("Tópicos e tarefas são salvos no Google Planilhas.")
         else:
             st.caption("Tópicos e tarefas são salvos no armazenamento configurado.")
 
@@ -176,7 +172,7 @@ class ChecklistView:
             for task in tasks:
                 task_id = task["id"]
                 task_text = task.get("texto", "")
-                done = bool(task.get("concluida"))
+                done = bool(task.get("done", False))
 
                 row = st.columns([0.78, 0.22])
                 checkbox_key = f"ctk_done_{task_id}"

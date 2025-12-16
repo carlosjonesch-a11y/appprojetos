@@ -5,8 +5,7 @@ import os
 from uuid import uuid4
 import random
 from src.modules.models import Projeto, Demanda, Etapa, StatusEnum, PriorityEnum
-from src.modules.postgres_manager import PostgresManager
-from src.modules.sharepoint_excel_manager import SharePointExcelManager
+from src.modules.google_sheets_manager import GoogleSheetsManager, parse_spreadsheet_id, load_service_account_info_from_env_or_secrets
 from src.components.ui_components2 import create_demanda_form_v2, create_projeto_form, create_etapa_form
 from src.modules.kanban import KanbanView, DashboardMetrics
 from src.modules.gantt import GanttChart
@@ -38,20 +37,25 @@ def _get_database_url() -> str:
         pass
     return ""
 
+def _get_gsheets_config() -> dict:
+    spreadsheet_value = _get_secret_value("GSHEETS_SPREADSHEET_ID") or _get_secret_value("GSHEETS_URL")
+    spreadsheet_id = parse_spreadsheet_id(spreadsheet_value)
 
-def _get_sharepoint_config() -> dict:
+    sa_configured = False
+    try:
+        _ = load_service_account_info_from_env_or_secrets(getattr(st, "secrets", None))
+        sa_configured = True
+    except Exception:
+        sa_configured = False
+
     return {
-        "tenant_id": _get_secret_value("SP_TENANT_ID"),
-        "client_id": _get_secret_value("SP_CLIENT_ID"),
-        "client_secret": _get_secret_value("SP_CLIENT_SECRET"),
-        "site_host": _get_secret_value("SP_SITE_HOST"),
-        "site_path": _get_secret_value("SP_SITE_PATH"),
-        "file_path": _get_secret_value("SP_FILE_PATH"),
+        "spreadsheet_id": spreadsheet_id,
+        "service_account_configured": sa_configured,
     }
 
 
-def _sharepoint_is_configured(cfg: dict) -> bool:
-    return all((cfg.get("tenant_id"), cfg.get("client_id"), cfg.get("client_secret"), cfg.get("site_host"), cfg.get("site_path"), cfg.get("file_path")))
+def _gsheets_is_configured(cfg: dict) -> bool:
+    return bool(cfg.get("spreadsheet_id")) and bool(cfg.get("service_account_configured"))
 
 
 def _get_secret_value(key: str) -> str:
@@ -213,22 +217,18 @@ def _compute_project_delay_risk(projetos, demandas):
     return df
 
 
-# Storage backend: SharePoint (Excel) ou Postgres
-sp_cfg = _get_sharepoint_config()
-use_sharepoint = _sharepoint_is_configured(sp_cfg)
 
-DATABASE_URL = _get_database_url()
+# Storage backend: Google Planilhas
+gs_cfg = _get_gsheets_config()
+use_gsheets = _gsheets_is_configured(gs_cfg)
 
-if use_sharepoint:
-    st.session_state.storage_backend = "sharepoint"
-    if "db_manager" not in st.session_state or not isinstance(st.session_state.db_manager, SharePointExcelManager):
-        st.session_state.db_manager = SharePointExcelManager(
-            tenant_id=sp_cfg["tenant_id"],
-            client_id=sp_cfg["client_id"],
-            client_secret=sp_cfg["client_secret"],
-            site_host=sp_cfg["site_host"],
-            site_path=sp_cfg["site_path"],
-            file_path=sp_cfg["file_path"],
+if use_gsheets:
+    st.session_state.storage_backend = "gsheets"
+    if "db_manager" not in st.session_state or not isinstance(st.session_state.db_manager, GoogleSheetsManager):
+        sa_info = load_service_account_info_from_env_or_secrets(getattr(st, "secrets", None))
+        st.session_state.db_manager = GoogleSheetsManager(
+            spreadsheet_id=gs_cfg["spreadsheet_id"],
+            service_account_info=sa_info,
         )
 
     if "db_connected" not in st.session_state:
@@ -237,28 +237,11 @@ if use_sharepoint:
         except Exception as e:
             st.session_state.db_connected = False
             st.session_state.db_error = str(e)
-
-elif DATABASE_URL:
-    st.session_state.storage_backend = "postgres"
-    if "db_manager" not in st.session_state or not isinstance(st.session_state.db_manager, PostgresManager):
-        st.session_state.db_manager = PostgresManager(DATABASE_URL)
-    else:
-        # Se o app foi atualizado, a instância pode ter ficado com uma classe antiga em memória.
-        if not hasattr(st.session_state.db_manager, "load_checklist_topics"):
-            st.session_state.db_manager = PostgresManager(DATABASE_URL)
-
-    if "db_connected" not in st.session_state:
-        try:
-            st.session_state.db_connected = bool(st.session_state.db_manager.health_check())
-        except Exception as e:
-            st.session_state.db_connected = False
-            st.session_state.db_error = str(e)
-
 else:
     st.session_state.storage_backend = "none"
     st.session_state.db_connected = False
     st.session_state.db_error = (
-        "Persistência não configurada. Configure SharePoint (SP_*) ou DATABASE_URL em Secrets do Streamlit Cloud."
+        "Persistência não configurada. Configure Google Planilhas (GSHEETS_SPREADSHEET_ID + GOOGLE_SERVICE_ACCOUNT_JSON) em Secrets do Streamlit Cloud."
     )
 
 # Load data from Postgres
@@ -541,10 +524,11 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("### Armazenamento")
+    backend = st.session_state.get('storage_backend', 'none')
     if st.session_state.get('db_connected', False):
-        st.info("Dados persistidos no Postgres (Neon)")
+        st.info(f"Persistido em: {backend}")
     else:
-        st.info("Dados armazenados em memória (sessão atual)")
+        st.info("Dados em memória (sessão atual)")
     st.write('DB connected:', st.session_state.get('db_connected', False))
     if st.session_state.get('db_error'):
         st.write('DB error:', st.session_state.get('db_error'))
@@ -661,33 +645,63 @@ with tab3:
     st.subheader("⚙️ Configurações")
     
     st.markdown("### 💾 Armazenamento de Dados")
-    
-    if st.session_state.db_connected:
-        st.success("✅ **Conectado ao PostgreSQL**")
 
-        try:
-            from sqlalchemy.engine.url import make_url
-            url = make_url(st.session_state.db_manager.database_url)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                host = url.host or ""
-                port = url.port or ""
-                st.info(f"**Host:** {host}:{port}".strip(':'))
-            with col2:
-                st.info(f"**Database:** {url.database or ''}")
-            with col3:
-                st.info(f"**Driver:** {url.drivername}")
-        except Exception:
-            # fallback simples, sem expor credenciais
-            st.info("DB conectado (detalhes indisponíveis)")
-        
-        st.markdown("---")
-        
-        if st.button("🔄 Sincronizar com Banco de Dados", key="sync_db"):
-            st.session_state.reload_data = True
-            st.rerun()
+    storage_backend = st.session_state.get("storage_backend", "none")
+    gs_cfg_view = _get_gsheets_config()
+    gs_missing = []
+    if not gs_cfg_view.get("spreadsheet_id"):
+        gs_missing.append("GSHEETS_SPREADSHEET_ID")
+    if not gs_cfg_view.get("service_account_configured"):
+        gs_missing.append("GOOGLE_SERVICE_ACCOUNT_JSON")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.info(f"**Backend selecionado:** {storage_backend}")
+    with col_b:
+        st.info(f"**Conectado:** {'sim' if st.session_state.get('db_connected') else 'não'}")
+
+    if storage_backend == "gsheets":
+        if st.session_state.get("db_connected"):
+            st.success("✅ **Conectado ao Google Planilhas**")
+        else:
+            st.error("❌ **Falha ao conectar no Google Planilhas**")
+
+        st.info(f"**Spreadsheet ID:** {gs_cfg_view.get('spreadsheet_id', '')}")
+
+        if gs_missing:
+            st.warning("Faltam secrets do Google: " + ", ".join(gs_missing))
+            st.caption("Você pode usar GSHEETS_SPREADSHEET_ID (ou GSHEETS_URL) e GOOGLE_SERVICE_ACCOUNT_JSON.")
+
+        if st.session_state.get("db_error"):
+            st.warning(f"Detalhes: {st.session_state.db_error}")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔌 Testar conexão Google Planilhas", key="test_gs"):
+                try:
+                    if gs_missing:
+                        raise ValueError("Google Planilhas não configurado: faltam secrets: " + ", ".join(gs_missing))
+                    sa_info = load_service_account_info_from_env_or_secrets(getattr(st, "secrets", None))
+                    mgr = GoogleSheetsManager(
+                        spreadsheet_id=gs_cfg_view["spreadsheet_id"],
+                        service_account_info=sa_info,
+                    )
+                    ok = bool(mgr.health_check())
+                    st.session_state.db_connected = ok
+                    st.session_state.db_error = "" if ok else "Falha no health_check do Google Planilhas (sem detalhes adicionais)."
+                    st.rerun()
+                except Exception as e:
+                    st.session_state.db_connected = False
+                    st.session_state.db_error = str(e)
+                    st.rerun()
+        with col2:
+            if st.button("🔄 Recarregar dados", key="reload_gs"):
+                st.session_state.reload_data = True
+                st.rerun()
     else:
-        st.error("❌ **Erro de Conexão com PostgreSQL**")
+        st.warning("Persistência não configurada (Google Planilhas).")
+        if gs_missing:
+            st.info("Faltam secrets: " + ", ".join(gs_missing))
         if st.session_state.get("db_error"):
             st.warning(f"Detalhes: {st.session_state.db_error}")
         st.info("Os dados estão sendo armazenados em memória (sessão atual).")
@@ -734,7 +748,7 @@ with tab4:
     st.subheader("🛠️ Gerenciar (Cadastro)")
 
     if not st.session_state.get("db_connected", False):
-        st.warning("Conecte o app ao PostgreSQL (DATABASE_URL) para cadastrar dados e persistir na nuvem.")
+        st.warning("Conecte o app ao Google Planilhas para cadastrar dados e persistir na nuvem.")
         st.stop()
 
     admin_password = _get_secret_value("ADMIN_PASSWORD")

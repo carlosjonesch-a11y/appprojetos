@@ -4,11 +4,8 @@ python-dateutil==2.9.0
 streamlit-option-menu==0.3.13
 Pillow==11.0.0
 plotly==5.24.1
-SQLAlchemy>=2.0.36,<3
-pg8000==1.31.5
 
-# SharePoint (Microsoft Graph) + Excel
-msal==1.31.0
-requests==2.32.3
-openpyxl==3.1.5
+# Google Sheets (Google API)
+gspread==6.1.4
+google-auth==2.37.0
 
